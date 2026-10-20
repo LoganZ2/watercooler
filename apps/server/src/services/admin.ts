@@ -105,16 +105,34 @@ const toAdminUser = (u: UserRow): AdminUser => ({
   createdAt: u.created_at,
 });
 
-/** People (never bots), admins first, optionally filtered by username or display name. */
-export function listUsers(db: DB, search?: string): AdminUser[] {
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+
+/**
+ * People (never bots), for the user pickers at /admin. A search matches the username or display
+ * name fuzzily: its characters in order, anywhere ("xm" finds xiaoming). Names that start with it
+ * come first, then names that contain it, then the rest; admins first when nothing is typed.
+ */
+export function listUsers(db: DB, search?: string, limit = 200): AdminUser[] {
   const q = search?.trim();
+  const matches = (p: string) => `(username LIKE ${p} ESCAPE '\\' OR display_name LIKE ${p} ESCAPE '\\')`;
   const rows = db
     .prepare(
       `SELECT * FROM users WHERE is_bot = 0
-        ${q ? `AND (username LIKE @q ESCAPE '\\' OR display_name LIKE @q ESCAPE '\\')` : ''}
-        ORDER BY is_admin DESC, id LIMIT 200`,
+        ${q ? `AND ${matches('@fuzzy')}` : ''}
+        ORDER BY ${q ? `CASE WHEN ${matches('@prefix')} THEN 0 WHEN ${matches('@contains')} THEN 1 ELSE 2 END,` : ''}
+                 is_admin DESC, id
+        LIMIT @limit`,
     )
-    .all(q ? { q: `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` } : {}) as UserRow[];
+    .all({
+      limit: Math.min(Math.max(limit, 1), 200),
+      ...(q
+        ? {
+            fuzzy: `%${[...q].map(escapeLike).join('%')}%`,
+            prefix: `${escapeLike(q)}%`,
+            contains: `%${escapeLike(q)}%`,
+          }
+        : {}),
+    }) as UserRow[];
   return rows.map(toAdminUser);
 }
 

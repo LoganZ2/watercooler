@@ -86,7 +86,7 @@ export const api = {
     overview: () => get<AdminOverview>('/admin/overview'),
     setFeature: (key: Feature, enabled: boolean) => post<AdminOverview>('/admin/features', { key, enabled }),
     restart: () => post<{ ok: true }>('/admin/restart'),
-    users: (q = '') => get<AdminUser[]>(`/admin/users${qs({ q })}`),
+    users: (q = '', limit?: number) => get<AdminUser[]>(`/admin/users${qs({ q, limit })}`),
     adjustBalance: (username: string, amount: number, reason: string) =>
       post<AdminUser>('/admin/balance', { username, amount, reason }),
     grantAll: (amount: number, reason: string) => post<{ users: number }>('/admin/balance/all', { amount, reason }),

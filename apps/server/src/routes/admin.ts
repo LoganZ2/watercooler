@@ -135,7 +135,7 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
 
   app.get('/admin/users', (c) => {
     requireAdmin(c);
-    return c.json<AdminUser[]>(listUsers(db, c.req.query('q')));
+    return c.json<AdminUser[]>(listUsers(db, c.req.query('q'), Number(c.req.query('limit')) || undefined));
   });
 
   app.post('/admin/balance', async (c) => {

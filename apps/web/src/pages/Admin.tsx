@@ -12,6 +12,7 @@ import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Money } from '../components/Money';
+import { UserPicker } from '../components/UserPicker';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageLoader, Segmented, Stat } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -345,12 +346,8 @@ function MoneyTab({ money }: { money: AdminOverview['money'] }) {
         <Card className="p-6">
           <h2 className="font-semibold">给一个人加减{CURRENCY_NAME}</h2>
           <form className="mt-4 space-y-4" onSubmit={submit('one')}>
-            <Field label="用户名">
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="在下方列表点选或直接输入"
-              />
+            <Field label="用户名" hint="输入用户名或昵称的几个字母，或在下方列表点选">
+              <UserPicker value={username} onChange={setUsername} />
             </Field>
             <Segmented
               value={direction}
@@ -504,7 +501,7 @@ function AdminsTab({ myId }: { myId: number }) {
           }}
         >
           <Field label="用户名" hint="管理员可以开关功能、重启实例、调整任何人的余额">
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+            <UserPicker value={username} onChange={setUsername} exclude={(u) => u.isAdmin} />
           </Field>
           <Button type="submit" disabled={!username.trim()} loading={add.isPending}>
             设为管理员

@@ -83,6 +83,24 @@ describe('admin console', () => {
     env.db.close();
   });
 
+  it('finds people for the user pickers from any letters of their name, best matches first', async () => {
+    const { env, admin } = await adminEnv();
+    for (const name of ['maxim', 'xiaoming', 'xiaohong', 'ma_li']) await env.register(name);
+    env.db.prepare(`UPDATE users SET display_name = '小明' WHERE username = 'xiaoming'`).run();
+    const find = async (q: string, limit = '') =>
+      (await admin.get(`/admin/users?q=${encodeURIComponent(q)}&limit=${limit}`)).body.map(
+        (u: { username: string }) => u.username,
+      );
+
+    expect(await find('m')).toEqual(['maxim', 'ma_li', 'xiaoming']);
+    expect(await find('xm')).toEqual(['maxim', 'xiaoming']);
+    expect(await find('小明')).toEqual(['xiaoming']);
+    expect(await find('_')).toEqual(['ma_li']);
+    expect(await find('%')).toEqual([]);
+    expect(await find('i', '2')).toHaveLength(2);
+    env.db.close();
+  });
+
   it('switches Polymarket off for new markets and records who did it', async () => {
     const { env, admin, alice } = await adminEnv();
     const market = {
