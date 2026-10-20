@@ -15,7 +15,7 @@ import {
   type IncomingText,
   type WecomTransport,
 } from '../src/wecom/transport';
-import { setup } from './helpers';
+import { fixedRuntime, setup } from './helpers';
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -137,7 +137,7 @@ function wecomEnv(settings: Partial<WecomSettings> = {}) {
       log: () => {},
     });
     services.push(service);
-    return { wecom: service };
+    return { runtime: fixedRuntime({ wecom: service }) };
   });
   const notices = () =>
     sendNotices({

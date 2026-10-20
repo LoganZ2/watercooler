@@ -2,6 +2,17 @@ import { createApp } from '../src/app';
 import { loadConfig, type Config } from '../src/config';
 import type { AppDeps } from '../src/context';
 import { openDatabase } from '../src/db';
+import type { AppRuntime } from '../src/runtime';
+
+/** Background services that are simply there (or not), for tests that don't exercise feature flags. */
+export function fixedRuntime(services: { bots?: boolean; wecom?: ReturnType<AppRuntime['wecom']> } = {}): AppRuntime {
+  return {
+    botsRunning: () => services.bots ?? false,
+    wecom: () => services.wecom,
+    features: () => [],
+    apply: async () => {},
+  };
+}
 
 /** `extra` adds optional app dependencies (like the WeCom bot), built from the test's db and clock. */
 export function setup(

@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { MarketCard } from '../components/MarketCard';
 import { Button, Card, DateTimeInput, Field, Input, Textarea } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { useMe } from '../lib/auth';
+import { useConfig, useMe } from '../lib/auth';
 import { COPY } from '../lib/site';
 
 /** datetime-local value (local time) for a timestamp. */
@@ -29,6 +29,7 @@ export default function CreateMarket() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { me } = useMe();
+  const config = useConfig();
   const [question, setQuestion] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
@@ -127,23 +128,26 @@ export default function CreateMarket() {
                   ['pool', '奖池模式', '押中的人按比例瓜分奖池'],
                   ['polymarket', 'Polymarket', 'Yes / No 份额 · bid / ask 订单簿'],
                 ] as const
-              ).map(([value, title, hint]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setMode(value);
-                    if (value === 'polymarket') setKind('binary');
-                  }}
-                  className={clsx(
-                    'rounded-lg border p-4 text-left',
-                    mode === value ? 'border-brand bg-brand-light' : 'border-line',
-                  )}
-                >
-                  <div className="font-semibold">{title}</div>
-                  <div className="mt-1 text-xs text-faint">{hint}</div>
-                </button>
-              ))}
+              )
+                // Admins can switch the order-book mode off for this instance.
+                .filter(([value]) => value === 'pool' || config?.polymarket !== false)
+                .map(([value, title, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setMode(value);
+                      if (value === 'polymarket') setKind('binary');
+                    }}
+                    className={clsx(
+                      'rounded-lg border p-4 text-left',
+                      mode === value ? 'border-brand bg-brand-light' : 'border-line',
+                    )}
+                  >
+                    <div className="font-semibold">{title}</div>
+                    <div className="mt-1 text-xs text-faint">{hint}</div>
+                  </button>
+                ))}
             </div>
           </div>
           <Field label="预测问题（必填）" hint={`至少 5 个字 · ${question.trim().length}/200`}>

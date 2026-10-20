@@ -21,6 +21,7 @@ const LEDGER_LABEL: Record<LedgerKind, string> = {
   order_lock: '买单冻结资金',
   order_release: '订单解冻 / 价差退回',
   sell: '卖出份额',
+  grant: '管理员调整',
 };
 
 function Ledger() {

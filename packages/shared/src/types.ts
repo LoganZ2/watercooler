@@ -16,6 +16,7 @@ export interface PublicUser extends UserRef {
 export interface Me extends PublicUser {
   balance: number;
   canClaimBonus: boolean;
+  isAdmin: boolean;
 }
 
 export interface AppConfig {
@@ -27,6 +28,8 @@ export interface AppConfig {
   aiZone: boolean;
   /** Whether the WeCom (企业微信) bot is connected, so accounts can be bound to it. */
   wecom: boolean;
+  /** Whether new markets may use the Polymarket (order book) mode. */
+  polymarket: boolean;
 }
 
 /** `closed` is derived: betting time is over but the creator has not announced the result yet. */
@@ -142,7 +145,17 @@ export interface PortfolioBet {
 }
 
 export type LedgerKind =
-  'signup' | 'bonus' | 'bet' | 'payout' | 'refund' | 'split' | 'merge' | 'order_lock' | 'order_release' | 'sell';
+  | 'signup'
+  | 'bonus'
+  | 'bet'
+  | 'payout'
+  | 'refund'
+  | 'split'
+  | 'merge'
+  | 'order_lock'
+  | 'order_release'
+  | 'sell'
+  | 'grant';
 
 export interface LedgerEntry {
   id: number;
@@ -272,4 +285,54 @@ export interface WecomBindRequest {
   expiresAt: number;
   /** The signed-in user's current binding, which confirming would replace. */
   current: WecomBinding | null;
+}
+
+/** Instance features an admin can switch on and off while the site runs. */
+export const FEATURES = ['aiBots', 'wecom', 'polymarket'] as const;
+export type Feature = (typeof FEATURES)[number];
+
+export interface FeatureState {
+  key: Feature;
+  enabled: boolean;
+  /** For features that need bot.json: whether it is there and valid. Null when nothing is needed. */
+  configured: boolean | null;
+  /** Whether the feature is actually running right now. */
+  active: boolean;
+  /** Why it is not active although enabled (missing config, failed to start, ...). */
+  problem: string | null;
+}
+
+export interface AdminOverview {
+  instance: string;
+  /** Deployed release, e.g. 20261019084706-b5e65c3; null when not run from a deploy. */
+  release: string | null;
+  startedAt: number;
+  restartAvailable: boolean;
+  features: FeatureState[];
+  money: {
+    users: number;
+    /** Spendable balances of people (not bots). */
+    balances: number;
+    /** Money of people sitting in unsettled markets (stakes and order escrow, net of sales). */
+    inMarkets: number;
+    /** Everything handed out: signup, daily bonus and admin grants. */
+    funded: number;
+  };
+}
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  displayName: string;
+  balance: number;
+  isAdmin: boolean;
+  createdAt: number;
+}
+
+export interface AdminAuditEntry {
+  id: number;
+  admin: UserRef;
+  action: string;
+  detail: string;
+  createdAt: number;
 }

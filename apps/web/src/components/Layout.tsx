@@ -11,6 +11,7 @@ import {
   Moon,
   Plus,
   Settings,
+  ShieldCheck,
   Sun,
   Trophy,
   User as UserIcon,
@@ -142,6 +143,7 @@ function UserMenu() {
     { to: `/u/${me.id}`, icon: UserIcon, label: '个人主页' },
     { to: '/portfolio', icon: Wallet, label: '我的下注' },
     { to: '/settings', icon: Settings, label: '账号设置' },
+    ...(me.isAdmin ? [{ to: '/admin', icon: ShieldCheck, label: '实例管理' }] : []),
   ];
 
   return (

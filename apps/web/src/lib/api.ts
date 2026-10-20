@@ -22,6 +22,10 @@ import type {
   OrderInput,
   WecomBinding,
   WecomBindRequest,
+  AdminAuditEntry,
+  AdminOverview,
+  AdminUser,
+  Feature,
 } from '@watercooler/shared';
 
 export class ApiError extends Error {
@@ -75,6 +79,19 @@ export const api = {
   wecomBindRequest: (token: string) => get<WecomBindRequest>(`/wecom/bind/${encodeURIComponent(token)}`),
   wecomBind: (token: string) => post<WecomBinding>('/wecom/bind', { token }),
   wecomUnbind: () => post<{ ok: true }>('/me/wecom/unbind'),
+
+  admin: {
+    overview: () => get<AdminOverview>('/admin/overview'),
+    setFeature: (key: Feature, enabled: boolean) => post<AdminOverview>('/admin/features', { key, enabled }),
+    restart: () => post<{ ok: true }>('/admin/restart'),
+    users: (q = '') => get<AdminUser[]>(`/admin/users${qs({ q })}`),
+    adjustBalance: (username: string, amount: number, reason: string) =>
+      post<AdminUser>('/admin/balance', { username, amount, reason }),
+    grantAll: (amount: number, reason: string) => post<{ users: number }>('/admin/balance/all', { amount, reason }),
+    addAdmin: (username: string) => post<AdminUser>('/admin/admins', { username }),
+    removeAdmin: (username: string) => post<AdminUser>('/admin/admins/remove', { username }),
+    audit: (before?: number) => get<AdminAuditEntry[]>(`/admin/audit${qs({ before })}`),
+  },
 
   stats: () => get<SiteStats>('/stats'),
   activity: (limit = 30, zone?: 'ai') => get<Bet[]>(`/activity${qs({ limit, zone })}`),

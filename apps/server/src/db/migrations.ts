@@ -310,4 +310,39 @@ export const migrations: string[] = [
   UPDATE markets SET settle_at = close_at;
   CREATE INDEX markets_settlement ON markets(status, settle_at);
   `,
+  /* 9: instance admins. Admins toggle features (settings), restart the instance and adjust
+        balances; every such action is kept in admin_audit. Balance adjustments are a new ledger
+        kind, 'grant', which counts as funding like the signup and daily bonus. */ `
+  ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
+
+  CREATE TABLE settings (
+    key        TEXT    PRIMARY KEY,
+    value      TEXT    NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE admin_audit (
+    id         INTEGER PRIMARY KEY,
+    admin_id   INTEGER NOT NULL REFERENCES users(id),
+    action     TEXT    NOT NULL,
+    detail     TEXT    NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  ALTER TABLE ledger RENAME TO old_ledger;
+  CREATE TABLE ledger (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    kind          TEXT    NOT NULL CHECK (kind IN ('signup', 'bonus', 'bet', 'payout', 'refund', 'split', 'merge',
+                                                   'order_lock', 'order_release', 'sell', 'grant')),
+    amount        INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    market_id     INTEGER REFERENCES markets(id),
+    note          TEXT,
+    created_at    INTEGER NOT NULL
+  );
+  INSERT INTO ledger SELECT * FROM old_ledger;
+  DROP TABLE old_ledger;
+  CREATE INDEX ledger_user ON ledger(user_id, id);
+  `,
 ];

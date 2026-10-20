@@ -29,6 +29,9 @@ export interface Config {
   basePath: string;
   /** bot.json with the AI bots' model settings; bots stay off when the file is missing. */
   botConfigPath: string;
+  /** Instance name and deployed release, set by the control script on the server. */
+  instance: string;
+  release: string | null;
 }
 
 /** Load `.env` from the repo root or the current directory if present. */
@@ -74,5 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     staticDir,
     basePath: normalizeBasePath(env.BASE_PATH),
     botConfigPath: env.BOT_CONFIG ? resolve(env.BOT_CONFIG) : resolve(REPO_ROOT, 'bot.json'),
+    instance: env.INSTANCE?.trim() || 'local',
+    release: env.RELEASE?.trim() || null,
   };
 }

@@ -13,10 +13,11 @@ import { hashPassword, verifyPassword } from '../lib/password';
 import { RateLimiter } from '../lib/rateLimit';
 import { endSession, revokeSessions, startSession } from '../lib/session';
 import { MINUTE } from '../lib/time';
+import { getFeatureFlags } from '../services/admin';
 import { aiMarketsExist } from '../services/markets';
 import { claimDailyBonus, createUser, getUserById, getUserByUsername, toMe } from '../services/users';
 
-export function authRoutes({ db, config, now, botsEnabled, wecom }: AppDeps) {
+export function authRoutes({ db, config, now, runtime }: AppDeps) {
   const app = new Hono<AppEnv>();
   const loginFailures = new RateLimiter(10, 15 * MINUTE);
   const registrations = new RateLimiter(20, 60 * MINUTE);
@@ -28,8 +29,9 @@ export function authRoutes({ db, config, now, botsEnabled, wecom }: AppDeps) {
       startingBalance: config.startingBalance,
       dailyBonus: config.dailyBonus,
       privateMode: config.privateMode,
-      aiZone: botsEnabled || aiMarketsExist(db),
-      wecom: wecom !== undefined,
+      aiZone: Boolean(runtime?.botsRunning()) || aiMarketsExist(db),
+      wecom: runtime?.wecom() !== undefined,
+      polymarket: getFeatureFlags(db).polymarket,
     }),
   );
 

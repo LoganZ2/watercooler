@@ -107,3 +107,29 @@ export const commentSchema = z.object({
 export const wecomBindSchema = z.object({
   token: z.string().trim().min(1, '绑定链接无效').max(200, '绑定链接无效'),
 });
+
+const adminReason = z.string().trim().min(2, '请写明原因').max(200, '原因最多 200 字');
+
+export const adminFeatureSchema = z.object({
+  key: z.enum(['aiBots', 'wecom', 'polymarket']),
+  enabled: z.boolean(),
+});
+
+export const adminBalanceSchema = z.object({
+  username: z.string().trim().min(1, '请输入用户名'),
+  /** Positive to add, negative to take away. */
+  amount: z
+    .number()
+    .refine((n) => Math.abs(n) >= 0.01, '金额至少 0.01')
+    .refine((n) => Math.abs(n) <= MAX_BET, '金额过大'),
+  reason: adminReason,
+});
+
+export const adminGrantAllSchema = z.object({
+  amount: z.number().min(0.01, '金额至少 0.01').max(MAX_BET, '金额过大'),
+  reason: adminReason,
+});
+
+export const adminUserSchema = z.object({
+  username: z.string().trim().min(1, '请输入用户名'),
+});

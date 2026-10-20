@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router';
 import { Layout } from './components/Layout';
 import { RequireAuth } from './components/RequireAuth';
 import { RouteError } from './components/RouteError';
+import AdminPage from './pages/Admin';
 import AiZone from './pages/AiZone';
 import BindWecom from './pages/BindWecom';
 import CreateMarket from './pages/CreateMarket';
@@ -34,6 +35,7 @@ export const router = createBrowserRouter(
             { path: '/portfolio', element: <PortfolioPage /> },
             { path: '/settings', element: <SettingsPage /> },
             { path: '/bind/:token', element: <BindWecom /> },
+            { path: '/admin', element: <AdminPage /> },
           ],
         },
         { path: '*', element: <NotFound /> },

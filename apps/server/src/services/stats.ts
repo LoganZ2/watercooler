@@ -31,7 +31,9 @@ export function computeAllStats(db: DB): Map<number, UserStats> {
   }
 
   const funded = db
-    .prepare(`SELECT user_id, SUM(amount) AS total FROM ledger WHERE kind IN ('signup', 'bonus') GROUP BY user_id`)
+    .prepare(
+      `SELECT user_id, SUM(amount) AS total FROM ledger WHERE kind IN ('signup', 'bonus', 'grant') GROUP BY user_id`,
+    )
     .all() as { user_id: number; total: number }[];
   for (const f of funded) {
     const s = stats.get(f.user_id);

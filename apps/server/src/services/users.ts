@@ -11,6 +11,7 @@ export interface UserRow {
   display_name: string;
   password_hash: string;
   is_bot: 0 | 1;
+  is_admin: 0 | 1;
   balance: number;
   last_bonus_date: string | null;
   created_at: number;
@@ -33,6 +34,7 @@ export function toMe(u: UserRow, config: Config, now: number): Me {
     ...toPublicUser(u),
     balance: fromCents(u.balance),
     canClaimBonus: config.dailyBonus > 0 && u.last_bonus_date !== localDate(now, config.timezone),
+    isAdmin: u.is_admin === 1,
   };
 }
 

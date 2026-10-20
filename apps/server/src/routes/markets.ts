@@ -12,7 +12,8 @@ import {
 } from '@watercooler/shared';
 import { Hono } from 'hono';
 import { requireUser, type AppDeps, type AppEnv } from '../context';
-import { badRequest, parseBody, parseId } from '../lib/http';
+import { badRequest, forbidden, parseBody, parseId } from '../lib/http';
+import { getFeatureFlags } from '../services/admin';
 import { cancelMarket, getBet, getUserStakes, listBets, listHolders, placeBet, resolveMarket } from '../services/bets';
 import { addComment, deleteComment, listComments } from '../services/comments';
 import {
@@ -75,6 +76,9 @@ export function marketRoutes({ db, now }: AppDeps) {
   app.post('/markets', async (c) => {
     const user = requireUser(c);
     const input = await parseBody(c, createMarketSchema);
+    if (input.mode === 'polymarket' && !getFeatureFlags(db).polymarket) {
+      throw forbidden('管理员已关闭 Polymarket 模式，只能创建奖池市场');
+    }
     const id = createMarket(db, user.id, input, now());
     return c.json({ id }, 201);
   });

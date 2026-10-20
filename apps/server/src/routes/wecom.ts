@@ -4,17 +4,18 @@ import { requireUser, type AppDeps, type AppEnv } from '../context';
 import { notFound, parseBody } from '../lib/http';
 import { confirmBinding, describeBindToken, getBindingByUser, toWecomBinding, unbindUser } from '../wecom/bindings';
 
-export function wecomRoutes({ db, now, wecom }: AppDeps) {
+export function wecomRoutes({ db, now, runtime }: AppDeps) {
   const app = new Hono<AppEnv>();
 
   app.get('/wecom/bind/:token', (c) => {
     const user = requireUser(c);
-    if (!wecom) throw notFound('企业微信机器人没有开启');
+    if (!runtime?.wecom()) throw notFound('企业微信机器人没有开启');
     return c.json<WecomBindRequest>(describeBindToken(db, c.req.param('token'), user.id, now()));
   });
 
   app.post('/wecom/bind', async (c) => {
     const user = requireUser(c);
+    const wecom = runtime?.wecom();
     if (!wecom) throw notFound('企业微信机器人没有开启');
     const { token } = await parseBody(c, wecomBindSchema);
     const binding = confirmBinding(db, token, user.id, now());

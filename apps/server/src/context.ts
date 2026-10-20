@@ -1,19 +1,19 @@
 import type { Context } from 'hono';
 import type { Config } from './config';
 import type { DB } from './db';
-import { unauthorized } from './lib/http';
+import { forbidden, unauthorized } from './lib/http';
 import type { UserRow } from './services/users';
-import type { WecomService } from './wecom/bot';
+import type { AppRuntime } from './runtime';
 
 export interface AppDeps {
   db: DB;
   config: Config;
   /** Injectable clock, for tests and seeding. */
   now: () => number;
-  /** Whether AI bots are running (a valid bot.json was found). */
-  botsEnabled?: boolean;
-  /** The WeCom bot, when bot.json configures one. */
-  wecom?: Pick<WecomService, 'announceBinding'>;
+  /** AI bots and the WeCom bot, switched by feature flags; absent where nothing runs in the background. */
+  runtime?: AppRuntime;
+  /** Restarts the whole instance; absent when it is not run by the deploy's control script. */
+  restart?: () => void;
 }
 
 export interface AppEnv {
@@ -27,5 +27,11 @@ export type Ctx = Context<AppEnv>;
 export function requireUser(c: Ctx): UserRow {
   const user = c.get('user');
   if (!user) throw unauthorized();
+  return user;
+}
+
+export function requireAdmin(c: Ctx): UserRow {
+  const user = requireUser(c);
+  if (!user.is_admin) throw forbidden('需要管理员权限');
   return user;
 }

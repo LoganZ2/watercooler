@@ -35,6 +35,8 @@ export interface WecomDeps {
 export interface WecomService {
   /** Called after someone confirms a binding on the website: say so in the group the link came from. */
   announceBinding(binding: BindingRow, user: UserRow): void;
+  /** Whether the long connection to WeCom is up and authenticated. */
+  connected(): boolean;
   stop(): void;
 }
 
@@ -216,6 +218,7 @@ export function startWecom(deps: WecomDeps): WecomService {
         .send(binding.chat_id, `✅ ${user.display_name} 绑定成功`)
         .catch((err: unknown) => log(`announce failed: ${errorText(err)}`));
     },
+    connected: () => transport.ready(),
     stop() {
       stopNotifier();
       transport.close();

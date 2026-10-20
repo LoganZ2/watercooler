@@ -3,6 +3,7 @@
 #
 #   ~/<instance>/<instance>.sh start|stop|restart|status|logs   e.g. ~/gang-bet/gang-bet.sh restart
 #   ~/<instance>/<instance>.sh reset-password <username> <new-password>
+#   ~/<instance>/<instance>.sh make-admin <username>      first admin; the rest are added at /admin
 #
 # Every deploy copies this script to <app-dir>/<instance>.sh and calls `restart`.
 # It runs <app-dir>/current; the database, pid file and logs live in <app-dir>/shared/.
@@ -33,8 +34,14 @@ export NODE_ENV=production
 export HOST=127.0.0.1
 export PORT BASE_PATH
 export DATABASE_PATH="$APP_DIR/shared/data/$INSTANCE.db"
-# AI bots run only when this file exists (see bot.example.json and deploy/README.md).
+# Credentials for the AI bots and the WeCom bot (see bot.example.json and deploy/README.md);
+# admins switch them on and off at /admin.
 export BOT_CONFIG="$APP_DIR/shared/bot.json"
+# Lets admins restart the instance from /admin, and shows what is deployed.
+export INSTANCE
+export CONTROL_SCRIPT="$APP_DIR/$(basename "${BASH_SOURCE[0]}")"
+RELEASE=$(basename "$(readlink -f "$APP_DIR/current" 2>/dev/null || echo unknown)")
+export RELEASE
 
 die() {
   echo "$INSTANCE: $*" >&2
@@ -126,15 +133,13 @@ case "${1:-}" in
     ;;
   status) status ;;
   logs) tail -n 100 -f "$LOG_FILE" ;;
-  reset-password)
-    # There are no in-app admins; a forgotten password is reset here.
-    shift
+  reset-password | make-admin)
     load_node
     cd "$APP_DIR/current"
-    node apps/server/dist/cli.js reset-password "$@"
+    node apps/server/dist/cli.js "$@"
     ;;
   *)
-    echo "usage: $0 start|stop|restart|status|logs|reset-password <username> <new-password>" >&2
+    echo "usage: $0 start|stop|restart|status|logs|reset-password <username> <new-password>|make-admin <username>" >&2
     exit 2
     ;;
 esac

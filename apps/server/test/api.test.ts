@@ -320,7 +320,7 @@ describe('betting', () => {
     expect(profile.createdMarkets).toHaveLength(1);
   });
 
-  it('validates market creation and has no admin endpoints', async () => {
+  it('validates market creation and keeps admin endpoints from ordinary users', async () => {
     const env = setup();
     const alice = await env.register('alice');
     const base = { question: '这是一个问题吗？', category: '其他', closeAt: env.clock.now + DAY };
@@ -330,6 +330,10 @@ describe('betting', () => {
       400,
     );
     expect((await alice.post('/markets', { ...base, outcomes: ['是', '否'] })).status).toBe(201);
-    expect((await env.app.request('http://localhost/api/admin/users')).status).toBe(404);
+    expect((await env.client().get('/admin/users')).status).toBe(401);
+    expect((await alice.get('/admin/users')).status).toBe(403);
+    expect((await alice.post('/admin/balance', { username: 'alice', amount: 100, reason: '自己加钱' })).status).toBe(
+      403,
+    );
   });
 });

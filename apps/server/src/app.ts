@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppDeps, AppEnv } from './context';
 import { HttpError } from './lib/http';
 import { loadSessionUser } from './lib/session';
+import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { marketRoutes } from './routes/markets';
 import { userRoutes } from './routes/users';
@@ -50,6 +51,7 @@ export function createApp(deps: AppDeps) {
   api.route('/', userRoutes(deps));
   api.route('/', tradingRoutes(deps));
   api.route('/', wecomRoutes(deps));
+  api.route('/', adminRoutes(deps));
 
   api.notFound((c) => c.json({ error: '接口不存在' }, 404));
   api.onError((err, c) => {
