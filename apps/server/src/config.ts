@@ -29,6 +29,8 @@ export interface Config {
   basePath: string;
   /** bot.json with the AI bots' model settings; bots stay off when the file is missing. */
   botConfigPath: string;
+  /** The .env file loaded at startup; admins edit its site settings at /admin. */
+  envFilePath: string;
   /** Instance name and deployed release, set by the control script on the server. */
   instance: string;
   release: string | null;
@@ -77,6 +79,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     staticDir,
     basePath: normalizeBasePath(env.BASE_PATH),
     botConfigPath: env.BOT_CONFIG ? resolve(env.BOT_CONFIG) : resolve(REPO_ROOT, 'bot.json'),
+    // On the server <release>/.env links to shared/.env (deploy/remote-deploy.sh).
+    envFilePath: resolve(REPO_ROOT, '.env'),
     instance: env.INSTANCE?.trim() || 'local',
     release: env.RELEASE?.trim() || null,
   };

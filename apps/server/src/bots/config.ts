@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 
 /** bot.json: how the AI bots reach the model and how busy they are. Lives next to the database, never in git. */
-const botConfigSchema = z.object({
+export const botConfigSchema = z.object({
   /** An Anthropic Messages API endpoint: the official one or a compatible relay. */
   endpoint: z.string().url().default('https://api.anthropic.com'),
   apiKey: z.string().min(1),

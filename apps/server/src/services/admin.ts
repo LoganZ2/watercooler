@@ -17,9 +17,15 @@ const FEATURE_LABEL: Record<Feature, string> = {
   polymarket: 'Polymarket 模式',
 };
 
-/** Every feature is on unless an admin switched it off, so a fresh database behaves as before. */
+/** Features that also need credentials from bot.json. */
+export type CredentialFeature = 'aiBots' | 'wecom';
+
+/**
+ * The flags alone decide what should run; credentials never switch a feature on or off. With no
+ * stored flag, Polymarket is on and the credential features are off (see seedFeatureFlags).
+ */
 export function getFeatureFlags(db: DB): Record<Feature, boolean> {
-  const flags = Object.fromEntries(FEATURES.map((f) => [f, true])) as Record<Feature, boolean>;
+  const flags: Record<Feature, boolean> = { aiBots: false, wecom: false, polymarket: true };
   const rows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'feature.%'`).all() as {
     key: string;
     value: string;
@@ -29,6 +35,22 @@ export function getFeatureFlags(db: DB): Record<Feature, boolean> {
     if (FEATURES.includes(key)) flags[key] = r.value === 'on';
   }
   return flags;
+}
+
+/**
+ * One-time move from the old rule (a feature ran whenever bot.json had its credentials) to
+ * explicit flags: a credential feature with no stored flag yet starts out on exactly when its
+ * credentials are there. Stored flags are never touched. Returns the features switched on.
+ */
+export function seedFeatureFlags(
+  db: DB,
+  configured: Record<CredentialFeature, boolean>,
+  now: number,
+): CredentialFeature[] {
+  const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)');
+  return (Object.keys(configured) as CredentialFeature[]).filter(
+    (key) => insert.run(`feature.${key}`, configured[key] ? 'on' : 'off', now).changes > 0 && configured[key],
+  );
 }
 
 export function setFeatureFlag(db: DB, adminId: number, key: Feature, enabled: boolean, now: number): void {

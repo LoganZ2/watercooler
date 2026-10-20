@@ -1,7 +1,13 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CURRENCY_NAME, type AdminOverview, type Feature, type FeatureState } from '@watercooler/shared';
+import {
+  CURRENCY_NAME,
+  type AdminInstanceConfig,
+  type AdminOverview,
+  type Feature,
+  type FeatureState,
+} from '@watercooler/shared';
 import clsx from 'clsx';
-import { RotateCw, ShieldAlert } from 'lucide-react';
+import { RotateCw, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -11,18 +17,22 @@ import { api, errorMessage } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { formatDate, formatRelative } from '../lib/format';
 
-type Tab = 'overview' | 'features' | 'money' | 'admins' | 'audit';
+type Tab = 'overview' | 'features' | 'config' | 'money' | 'admins' | 'audit';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: '概览' },
   { value: 'features', label: '功能开关' },
+  { value: 'config', label: '配置' },
   { value: 'money', label: `${CURRENCY_NAME}运维` },
   { value: 'admins', label: '管理员' },
   { value: 'audit', label: '操作记录' },
 ];
 
 const FEATURE_TEXT: Record<Feature, { title: string; hint: string }> = {
-  aiBots: { title: 'AI 机器人', hint: '机器人联网出题、下注并公布 AI 专区的结果。需要服务器上的 bot.json。' },
-  wecom: { title: '企业微信机器人', hint: '群里 @机器人 绑定账号、聊天下注。需要 bot.json 里的 wecom 配置。' },
+  aiBots: { title: 'AI 机器人', hint: '机器人联网出题、下注并公布 AI 专区的结果。需要「配置」里的 AI 模型。' },
+  wecom: {
+    title: '企业微信机器人',
+    hint: '群里 @机器人 绑定账号、聊天下注。需要「配置」里的 AI 模型和企业微信凭证。',
+  },
   polymarket: {
     title: 'Polymarket 模式',
     hint: '允许新建订单簿（Yes / No 份额）市场。关闭后已有的这类市场照常交易和结算。',
@@ -55,6 +65,18 @@ export default function AdminPage() {
   return (
     <div>
       <h1 className="section-title">实例管理</h1>
+      {overview.data.restartNeeded && (
+        <Card className="mt-4 flex flex-col gap-3 border-gold/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5 text-sm">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-gold" />
+            <span>
+              配置已修改，重启实例后才会生效。
+              {!overview.data.restartAvailable && ` 在服务器上执行 ${overview.data.instance}.sh restart。`}
+            </span>
+          </div>
+          {overview.data.restartAvailable && <RestartButton data={overview.data} />}
+        </Card>
+      )}
       <p className="mt-2 text-sm text-dim">
         {`实例 ${overview.data.instance} · ${overview.data.release ? `版本 ${overview.data.release}` : '本地开发环境'} · 启动于 ${formatRelative(overview.data.startedAt)}`}
       </p>
@@ -71,6 +93,7 @@ export default function AdminPage() {
       <div className="mt-6">
         {tab === 'overview' && <OverviewTab data={overview.data} />}
         {tab === 'features' && <FeaturesTab features={overview.data.features} />}
+        {tab === 'config' && <ConfigTab />}
         {tab === 'money' && <MoneyTab money={overview.data.money} />}
         {tab === 'admins' && <AdminsTab myId={me.id} />}
         {tab === 'audit' && <AuditTab />}
@@ -96,7 +119,8 @@ function MoneyStats({ money }: { money: AdminOverview['money'] }) {
   );
 }
 
-function OverviewTab({ data }: { data: AdminOverview }) {
+/** Restart with a confirmation, then wait until the new process answers. */
+function RestartButton({ data, variant = 'primary' }: { data: AdminOverview; variant?: 'primary' | 'outline' }) {
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -111,6 +135,7 @@ function OverviewTab({ data }: { data: AdminOverview }) {
         const fresh = await api.admin.overview().catch(() => null);
         if (fresh && fresh.startedAt > data.startedAt + 1000) {
           qc.setQueryData(['admin', 'overview'], fresh);
+          void qc.invalidateQueries();
           setRestarting(false);
           toast.success('实例已重启');
           return;
@@ -122,6 +147,30 @@ function OverviewTab({ data }: { data: AdminOverview }) {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  return (
+    <>
+      <Button
+        variant={variant}
+        disabled={!data.restartAvailable || restarting}
+        loading={restarting}
+        onClick={() => setConfirming(true)}
+      >
+        {!restarting && <RotateCw className="size-4" />}
+        {restarting ? '正在重启…' : '重启实例'}
+      </Button>
+      <Modal open={confirming} onClose={() => setConfirming(false)} title="重启实例">
+        <p className="text-sm leading-relaxed text-dim">
+          网站会中断几秒钟，正在进行的请求会失败；数据不受影响。确定重启 {data.instance} 吗？
+        </p>
+        <Button className="mt-5 w-full" loading={restart.isPending} onClick={() => restart.mutate()}>
+          确认重启
+        </Button>
+      </Modal>
+    </>
+  );
+}
+
+function OverviewTab({ data }: { data: AdminOverview }) {
   return (
     <div className="space-y-6">
       <MoneyStats money={data.money} />
@@ -141,28 +190,12 @@ function OverviewTab({ data }: { data: AdminOverview }) {
           <h2 className="font-semibold">重启实例</h2>
           <p className="mt-1 text-sm text-dim">
             {data.restartAvailable
-              ? '改了服务器上的 .env 之类的配置后需要重启。重启时网站会中断几秒钟。'
+              ? '在「配置」里改过设置后需要重启才生效。重启时网站会中断几秒钟。'
               : '只有服务器上部署的实例可以在线重启。'}
           </p>
         </div>
-        <Button
-          variant="outline"
-          disabled={!data.restartAvailable || restarting}
-          loading={restarting}
-          onClick={() => setConfirming(true)}
-        >
-          {!restarting && <RotateCw className="size-4" />}
-          {restarting ? '正在重启…' : '重启'}
-        </Button>
+        <RestartButton data={data} variant="outline" />
       </Card>
-      <Modal open={confirming} onClose={() => setConfirming(false)} title="重启实例">
-        <p className="text-sm leading-relaxed text-dim">
-          网站会中断几秒钟，正在进行的请求会失败；数据不受影响。确定重启 {data.instance} 吗？
-        </p>
-        <Button className="mt-5 w-full" loading={restart.isPending} onClick={() => restart.mutate()}>
-          确认重启
-        </Button>
-      </Modal>
     </div>
   );
 }
@@ -170,7 +203,12 @@ function OverviewTab({ data }: { data: AdminOverview }) {
 function FeatureStatus({ feature }: { feature: FeatureState }) {
   if (!feature.enabled) return <span className="text-faint">已关闭</span>;
   if (feature.active) return <span className="text-yes">运行中</span>;
-  return <span className="text-right text-gold">{feature.problem ?? '未运行'}</span>;
+  // On without its credentials is a misconfiguration, not "off".
+  return (
+    <span className={clsx('text-right', feature.configured === false ? 'text-no' : 'text-gold')}>
+      {feature.problem ?? '未运行'}
+    </span>
+  );
 }
 
 function Switch({
@@ -233,18 +271,21 @@ function FeaturesTab({ features }: { features: FeatureState[] }) {
             <p className="mt-1.5 text-xs">
               <FeatureStatus feature={f} />
             </p>
+            {!f.enabled && f.configured === false && (
+              <p className="mt-1 text-xs text-faint">先在「配置」里填好并重启实例，才能打开。</p>
+            )}
           </div>
           <Switch
             label={FEATURE_TEXT[f.key].title}
             checked={f.enabled}
-            disabled={toggle.isPending}
+            // Without credentials a feature can only be switched off, never on.
+            disabled={toggle.isPending || (!f.enabled && f.configured === false)}
             onChange={(enabled) => toggle.mutate({ key: f.key, enabled })}
           />
         </div>
       ))}
       <p className="p-5 text-xs leading-relaxed text-faint">
-        开关立即生效，不用重启。AI 机器人和企业微信机器人还需要服务器上的 bot.json 提供密钥；改了 bot.json
-        后在这里关掉再打开对应开关，就会按新配置重新启动。
+        开关立即生效，不用重启。AI 机器人和企业微信机器人要用到「配置」里的凭证，凭证改过后要重启实例才生效。
       </p>
     </Card>
   );
@@ -506,6 +547,248 @@ function AuditTab() {
           加载更多
         </Button>
       )}
+    </Card>
+  );
+}
+
+/** Save a config form: the server writes the file, and the restart banner appears. */
+function useSaveConfig<T>(save: (input: T) => Promise<AdminInstanceConfig>, done = '已保存，重启实例后生效') {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: save,
+    onSuccess: (config) => {
+      qc.setQueryData(['admin', 'config'], config);
+      void qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'audit'] });
+      toast.success(done);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+}
+
+/** Numbers typed into inputs; empty stays empty instead of becoming 0. */
+const numberField = (value: string) => (value.trim() === '' ? NaN : Number(value));
+
+function ConfigTab() {
+  const { data } = useQuery({ queryKey: ['admin', 'config'], queryFn: api.admin.config });
+  if (!data) return <PageLoader />;
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-dim">
+        这里改的是服务器上的 bot.json 和 .env，保存后要重启实例才生效。密钥只显示末四位，留空表示不改。
+      </p>
+      {data.botError && (
+        <p className="rounded border border-no/40 px-4 py-3 text-sm text-no">
+          服务器上的 bot.json 有问题：{data.botError}
+        </p>
+      )}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Keyed by the saved values so each form starts over after a save; the prefixes keep the keys distinct. */}
+        <AiConfigForm key={`ai:${JSON.stringify(data.ai)}`} ai={data.ai} />
+        <WecomConfigForm key={`wecom:${JSON.stringify(data.wecom)}`} wecom={data.wecom} hasAi={data.ai !== null} />
+      </div>
+      <SiteConfigForm key={`site:${JSON.stringify(data.site)}`} site={data.site} />
+    </div>
+  );
+}
+
+function AiConfigForm({ ai }: { ai: AdminInstanceConfig['ai'] }) {
+  const [endpoint, setEndpoint] = useState(ai?.endpoint ?? 'https://api.anthropic.com');
+  const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState(ai?.model ?? '');
+  const [bots, setBots] = useState(String(ai?.bots ?? 50));
+  const [marketsPerDay, setMarketsPerDay] = useState(String(ai?.marketsPerDay ?? 2));
+  const [betsPerDay, setBetsPerDay] = useState(String(ai?.betsPerDay ?? 50));
+  const [flip, setFlip] = useState(String(ai?.flipProbability ?? 0.2));
+  const save = useSaveConfig(api.admin.saveAi);
+
+  return (
+    <Card className="p-6">
+      <h2 className="font-semibold">AI 模型</h2>
+      <p className="mt-1 text-xs text-faint">AI 机器人和企业微信聊天共用；Anthropic Messages API 或兼容的中转。</p>
+      <form
+        className="mt-4 space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(
+            {
+              endpoint: endpoint.trim(),
+              apiKey: apiKey.trim() || undefined,
+              model: model.trim(),
+              bots: numberField(bots),
+              marketsPerDay: numberField(marketsPerDay),
+              betsPerDay: numberField(betsPerDay),
+              flipProbability: numberField(flip),
+            },
+            // Never keep a typed secret around once it is saved.
+            { onSuccess: () => setApiKey('') },
+          );
+        }}
+      >
+        <Field label="Endpoint">
+          <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+        </Field>
+        <Field label="API key" hint={ai?.apiKeyHint ? `${ai.apiKeyHint}，留空不改` : undefined}>
+          <Input
+            type="password"
+            autoComplete="off"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={ai?.apiKeyHint ? '留空表示不改' : '必填'}
+          />
+        </Field>
+        <Field label="模型">
+          <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="例如 claude-opus-5-5" />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="机器人数量">
+            <Input type="number" min={1} value={bots} onChange={(e) => setBots(e.target.value)} />
+          </Field>
+          <Field label="押反概率" hint="0 到 1">
+            <Input type="number" min={0} max={1} step="0.05" value={flip} onChange={(e) => setFlip(e.target.value)} />
+          </Field>
+          <Field label="每天出题上限" hint="最花钱的部分">
+            <Input type="number" min={0} value={marketsPerDay} onChange={(e) => setMarketsPerDay(e.target.value)} />
+          </Field>
+          <Field label="每天下注上限">
+            <Input type="number" min={0} value={betsPerDay} onChange={(e) => setBetsPerDay(e.target.value)} />
+          </Field>
+        </div>
+        <Button type="submit" loading={save.isPending} disabled={!endpoint.trim() || !model.trim()}>
+          保存
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+function WecomConfigForm({ wecom, hasAi }: { wecom: AdminInstanceConfig['wecom']; hasAi: boolean }) {
+  const [botId, setBotId] = useState(wecom?.botId ?? '');
+  const [secret, setSecret] = useState('');
+  const [siteUrl, setSiteUrl] = useState(
+    wecom?.siteUrl ?? `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/+$/, ''),
+  );
+  const [siteName, setSiteName] = useState(wecom?.siteName ?? 'Watercooler');
+  const [perHour, setPerHour] = useState(String(wecom?.messagesPerHour ?? 30));
+  const save = useSaveConfig(api.admin.saveWecom);
+  const remove = useSaveConfig(api.admin.removeWecom, '已移除，重启实例后生效');
+
+  return (
+    <Card className="p-6">
+      <h2 className="font-semibold">企业微信机器人</h2>
+      <p className="mt-1 text-xs text-faint">企业微信智能机器人，连接方式选「长连接」。</p>
+      {!hasAi ? (
+        <p className="mt-4 text-sm text-dim">先保存左边的 AI 模型配置：企业微信聊天用的是同一个模型。</p>
+      ) : (
+        <form
+          className="mt-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate(
+              {
+                botId: botId.trim(),
+                secret: secret.trim() || undefined,
+                siteUrl: siteUrl.trim(),
+                siteName: siteName.trim(),
+                messagesPerHour: numberField(perHour),
+              },
+              { onSuccess: () => setSecret('') },
+            );
+          }}
+        >
+          <Field label="Bot ID">
+            <Input value={botId} onChange={(e) => setBotId(e.target.value)} />
+          </Field>
+          <Field label="Secret" hint={wecom?.secretHint ? `${wecom.secretHint}，留空不改` : undefined}>
+            <Input
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder={wecom?.secretHint ? '留空表示不改' : '必填'}
+            />
+          </Field>
+          <Field label="网站地址" hint="绑定链接和市场链接用这个地址">
+            <Input value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="网站名称">
+              <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} />
+            </Field>
+            <Field label="每人每小时消息上限">
+              <Input type="number" min={1} value={perHour} onChange={(e) => setPerHour(e.target.value)} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit" loading={save.isPending} disabled={!botId.trim() || !siteUrl.trim()}>
+              保存
+            </Button>
+            {wecom && (
+              <Button
+                type="button"
+                variant="danger"
+                loading={remove.isPending}
+                onClick={() => remove.mutate(undefined)}
+              >
+                移除企业微信配置
+              </Button>
+            )}
+          </div>
+        </form>
+      )}
+    </Card>
+  );
+}
+
+function SiteConfigForm({ site }: { site: AdminInstanceConfig['site'] }) {
+  const [inviteCode, setInviteCode] = useState(site.inviteCode);
+  const [privateMode, setPrivateMode] = useState(site.privateMode);
+  const [startingBalance, setStartingBalance] = useState(String(site.startingBalance));
+  const [dailyBonus, setDailyBonus] = useState(String(site.dailyBonus));
+  const [timezone, setTimezone] = useState(site.timezone);
+  const save = useSaveConfig(api.admin.saveSite);
+
+  return (
+    <Card className="p-6">
+      <h2 className="font-semibold">站点设置</h2>
+      <form
+        className="mt-4 grid gap-4 sm:grid-cols-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate({
+            inviteCode: inviteCode.trim(),
+            privateMode,
+            startingBalance: numberField(startingBalance),
+            dailyBonus: numberField(dailyBonus),
+            timezone: timezone.trim(),
+          });
+        }}
+      >
+        <Field label="邀请码" hint="留空表示注册不需要邀请码">
+          <Input value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} />
+        </Field>
+        <Field label="时区" hint="「每日」签到按这个时区算">
+          <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+        </Field>
+        <Field label={`注册赠送（${CURRENCY_NAME}）`}>
+          <Input type="number" min={0} value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} />
+        </Field>
+        <Field label={`每日签到（${CURRENCY_NAME}）`} hint="0 表示关闭签到">
+          <Input type="number" min={0} value={dailyBonus} onChange={(e) => setDailyBonus(e.target.value)} />
+        </Field>
+        <div className="flex items-center justify-between gap-4 rounded border border-line px-4 py-3 sm:col-span-2">
+          <div>
+            <div className="text-sm">私有模式</div>
+            <div className="text-xs text-faint">打开后，没登录的人什么都看不到</div>
+          </div>
+          <Switch label="私有模式" checked={privateMode} onChange={setPrivateMode} />
+        </div>
+        <div className="sm:col-span-2">
+          <Button type="submit" loading={save.isPending}>
+            保存
+          </Button>
+        </div>
+      </form>
     </Card>
   );
 }

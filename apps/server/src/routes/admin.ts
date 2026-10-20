@@ -1,9 +1,13 @@
 import {
+  adminAiConfigSchema,
   adminBalanceSchema,
   adminFeatureSchema,
+  adminSiteConfigSchema,
+  adminWecomConfigSchema,
   adminGrantAllSchema,
   adminUserSchema,
   type AdminAuditEntry,
+  type AdminInstanceConfig,
   type AdminOverview,
   type AdminUser,
 } from '@watercooler/shared';
@@ -20,17 +24,31 @@ import {
   setAdmin,
   setFeatureFlag,
 } from '../services/admin';
+import {
+  describeInstanceConfig,
+  readText,
+  removeWecomConfig,
+  saveAiConfig,
+  saveSiteConfig,
+  saveWecomConfig,
+} from '../services/instanceConfig';
 
 /** Instance management; every route needs an admin (see requireAdmin). */
 export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
   const app = new Hono<AppEnv>();
   const startedAt = Math.round(Date.now() - process.uptime() * 1000);
+  // The configuration files as this process found them; a difference later means a restart is due.
+  const botAtStart = readText(config.botConfigPath);
+  const envAtStart = readText(config.envFilePath);
+  const restartNeeded = () =>
+    readText(config.botConfigPath) !== botAtStart || readText(config.envFilePath) !== envAtStart;
 
   const overview = (): AdminOverview => ({
     instance: config.instance,
     release: config.release,
     startedAt,
     restartAvailable: restart !== undefined,
+    restartNeeded: restartNeeded(),
     features: runtime?.features() ?? [],
     money: moneyOverview(db),
   });
@@ -43,6 +61,19 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
   app.post('/admin/features', async (c) => {
     const admin = requireAdmin(c);
     const { key, enabled } = await parseBody(c, adminFeatureSchema);
+    // The flag alone decides what runs, so it may only go on once the running instance has the
+    // credentials (saved ones count after the restart).
+    if (
+      enabled &&
+      (key === 'aiBots' || key === 'wecom') &&
+      !runtime?.features().find((f) => f.key === key)?.configured
+    ) {
+      throw conflict(
+        key === 'wecom'
+          ? '还没有企业微信配置：先在「配置」里填写并重启'
+          : '还没有 AI 模型配置：先在「配置」里填写并重启',
+      );
+    }
     setFeatureFlag(db, admin.id, key, enabled, now());
     // Bots and the WeCom bot start or stop right away; Polymarket is checked on every new market.
     await runtime?.apply();
@@ -56,6 +87,50 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
     // Answer first: the restart stops this very process.
     setTimeout(restart, 500);
     return c.json({ ok: true });
+  });
+
+  const configView = () => describeInstanceConfig(config, restartNeeded());
+
+  app.get('/admin/config', (c) => {
+    requireAdmin(c);
+    return c.json<AdminInstanceConfig>(configView());
+  });
+
+  app.post('/admin/config/ai', async (c) => {
+    const admin = requireAdmin(c);
+    const input = await parseBody(c, adminAiConfigSchema);
+    const newKey = saveAiConfig(config.botConfigPath, input);
+    audit(db, admin.id, 'config', `更新 AI 模型配置（模型 ${input.model}${newKey ? '，更换了 API key' : ''}）`, now());
+    return c.json<AdminInstanceConfig>(configView());
+  });
+
+  app.post('/admin/config/wecom', async (c) => {
+    const admin = requireAdmin(c);
+    const input = await parseBody(c, adminWecomConfigSchema);
+    const newSecret = saveWecomConfig(config.botConfigPath, input);
+    audit(db, admin.id, 'config', `更新企业微信配置${newSecret ? '（更换了 Secret）' : ''}`, now());
+    return c.json<AdminInstanceConfig>(configView());
+  });
+
+  app.post('/admin/config/wecom/remove', (c) => {
+    const admin = requireAdmin(c);
+    removeWecomConfig(config.botConfigPath);
+    audit(db, admin.id, 'config', '移除企业微信配置', now());
+    return c.json<AdminInstanceConfig>(configView());
+  });
+
+  app.post('/admin/config/site', async (c) => {
+    const admin = requireAdmin(c);
+    const input = await parseBody(c, adminSiteConfigSchema);
+    saveSiteConfig(config.envFilePath, input);
+    audit(
+      db,
+      admin.id,
+      'config',
+      `更新站点设置（${input.inviteCode ? '需要邀请码' : '不需要邀请码'}，${input.privateMode ? '私有模式' : '公开浏览'}，注册赠送 ${input.startingBalance}，每日签到 ${input.dailyBonus}，时区 ${input.timezone}）`,
+      now(),
+    );
+    return c.json<AdminInstanceConfig>(configView());
   });
 
   app.get('/admin/users', (c) => {

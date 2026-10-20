@@ -23,7 +23,8 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 
 await runtime.apply();
 for (const f of runtime.features()) {
-  if (f.enabled && f.problem && f.configured !== false) console.log(`   ${f.key}: ${f.problem}`);
+  // A feature switched on without its credentials is a misconfiguration worth seeing in the log.
+  if (f.enabled && f.problem) console.warn(`   ${f.key} is on but not running: ${f.problem}`);
 }
 
 function shutdown() {

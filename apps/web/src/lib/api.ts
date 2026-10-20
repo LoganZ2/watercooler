@@ -23,7 +23,9 @@ import type {
   WecomBinding,
   WecomBindRequest,
   AdminAuditEntry,
+  AdminInstanceConfig,
   AdminOverview,
+  AdminSiteConfig,
   AdminUser,
   Feature,
 } from '@watercooler/shared';
@@ -91,6 +93,25 @@ export const api = {
     addAdmin: (username: string) => post<AdminUser>('/admin/admins', { username }),
     removeAdmin: (username: string) => post<AdminUser>('/admin/admins/remove', { username }),
     audit: (before?: number) => get<AdminAuditEntry[]>(`/admin/audit${qs({ before })}`),
+    config: () => get<AdminInstanceConfig>('/admin/config'),
+    saveAi: (input: {
+      endpoint: string;
+      apiKey?: string;
+      model: string;
+      bots: number;
+      marketsPerDay: number;
+      betsPerDay: number;
+      flipProbability: number;
+    }) => post<AdminInstanceConfig>('/admin/config/ai', input),
+    saveWecom: (input: {
+      botId: string;
+      secret?: string;
+      siteUrl: string;
+      siteName: string;
+      messagesPerHour: number;
+    }) => post<AdminInstanceConfig>('/admin/config/wecom', input),
+    removeWecom: () => post<AdminInstanceConfig>('/admin/config/wecom/remove'),
+    saveSite: (input: AdminSiteConfig) => post<AdminInstanceConfig>('/admin/config/site', input),
   },
 
   stats: () => get<SiteStats>('/stats'),

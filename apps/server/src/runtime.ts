@@ -6,7 +6,7 @@ import { createAsk, createChat } from './bots/llm';
 import { startBots } from './bots/scheduler';
 import type { Config } from './config';
 import type { DB } from './db';
-import { getFeatureFlags } from './services/admin';
+import { getFeatureFlags, seedFeatureFlags } from './services/admin';
 import { startWecom, type WecomService } from './wecom/bot';
 import { connectWecom } from './wecom/transport';
 
@@ -15,7 +15,7 @@ export interface AppRuntime {
   botsRunning(): boolean;
   wecom(): Pick<WecomService, 'announceBinding'> | undefined;
   features(): FeatureState[];
-  /** Start or stop the services to match the feature flags and the current bot.json. */
+  /** Start or stop the services to match the feature flags. */
   apply(): Promise<void>;
 }
 
@@ -36,9 +36,9 @@ export interface RuntimeDeps {
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
- * Runs the AI bots and the WeCom bot when their feature flag is on and bot.json has what they
- * need. bot.json is re-read on every apply(), so credentials can change without a restart; a
- * service whose settings changed is restarted.
+ * Runs the AI bots and the WeCom bot exactly when their feature flag is on. bot.json only supplies
+ * their credentials, read once at startup: a flag that is on while they are missing is reported
+ * as misconfigured, never treated as off.
  */
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const { db, config, now } = deps;
@@ -61,51 +61,54 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return startWecom({ db, config, settings: bot.wecom!, chat: createChat(bot), transport, now, log: wecomLog });
     });
 
+  // bot.json is read once, at the first apply(): changed credentials take effect after a restart,
+  // like every other setting, while flags switch the services on and off right away.
+  let loaded = false;
   let bot: BotConfig | null = null;
   let botError: string | null = null;
-  let bots: { stop: () => void; key: string } | null = null;
+  let stopBots: (() => void) | null = null;
   let botsProblem: string | null = null;
-  let wecom: { service: WecomService; key: string } | null = null;
+  let wecom: WecomService | null = null;
   let wecomProblem: string | null = null;
 
   async function sync(): Promise<void> {
-    try {
-      bot = loadBotConfig(config.botConfigPath);
-      botError = null;
-    } catch (err) {
-      bot = null;
-      botError = errorText(err);
+    if (!loaded) {
+      loaded = true;
+      try {
+        bot = loadBotConfig(config.botConfigPath);
+        // Instances that ran before the flags existed keep running what their bot.json enabled.
+        const seeded = seedFeatureFlags(db, { aiBots: bot !== null, wecom: Boolean(bot?.wecom) }, now());
+        if (seeded.length) log(`feature flags switched on from bot.json: ${seeded.join(', ')}`);
+      } catch (err) {
+        botError = errorText(err);
+      }
     }
     const flags = getFeatureFlags(db);
 
-    const botsKey = bot ? JSON.stringify({ ...bot, wecom: undefined }) : null;
-    if (bots && (!flags.aiBots || bots.key !== botsKey)) {
-      bots.stop();
-      bots = null;
+    if (stopBots && !flags.aiBots) {
+      stopBots();
+      stopBots = null;
       log('🤖 AI bots stopped');
     }
     botsProblem = null;
-    if (flags.aiBots && bot && !bots) {
+    if (flags.aiBots && bot && !stopBots) {
       try {
-        bots = { stop: await launchBots(bot), key: botsKey! };
+        stopBots = await launchBots(bot);
       } catch (err) {
         botsProblem = `启动失败：${errorText(err)}`;
         log(`AI bots failed to start: ${errorText(err)}`);
       }
     }
 
-    const wecomKey = bot?.wecom
-      ? JSON.stringify([bot.wecom, bot.endpoint, bot.apiKey, bot.model, bot.effort, bot.refusalFallback])
-      : null;
-    if (wecom && (!flags.wecom || wecom.key !== wecomKey)) {
-      wecom.service.stop();
+    if (wecom && !flags.wecom) {
+      wecom.stop();
       wecom = null;
       log('[wecom] stopped');
     }
     wecomProblem = null;
     if (flags.wecom && bot?.wecom && !wecom) {
       try {
-        wecom = { service: launchWecom(bot), key: wecomKey! };
+        wecom = launchWecom(bot);
       } catch (err) {
         wecomProblem = `启动失败：${errorText(err)}`;
         log(`WeCom bot failed to start: ${errorText(err)}`);
@@ -117,47 +120,47 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   let queue: Promise<void> = Promise.resolve();
 
   return {
-    botsRunning: () => bots !== null,
-    wecom: () => wecom?.service,
+    botsRunning: () => stopBots !== null,
+    wecom: () => wecom ?? undefined,
     apply() {
       queue = queue.then(sync, sync);
       return queue;
     },
     features() {
       const flags = getFeatureFlags(db);
-      const noConfig = botError ?? '服务器上没有 bot.json';
+      const noConfig = botError ? `缺少配置：bot.json 有误（${botError}）` : '缺少配置：服务器上没有 bot.json';
       return [
         {
           key: 'aiBots',
           enabled: flags.aiBots,
           configured: bot !== null,
-          active: bots !== null,
-          problem: flags.aiBots && !bots ? (bot ? (botsProblem ?? '正在启动') : noConfig) : null,
+          active: stopBots !== null,
+          problem: flags.aiBots && !stopBots ? (bot ? (botsProblem ?? '正在启动') : noConfig) : null,
         },
         {
           key: 'wecom',
           enabled: flags.wecom,
           configured: Boolean(bot?.wecom),
-          active: wecom !== null && wecom.service.connected(),
+          active: wecom !== null && wecom.connected(),
           problem: !flags.wecom
             ? null
             : wecom
-              ? wecom.service.connected()
+              ? wecom.connected()
                 ? null
                 : '正在连接企业微信；一直连不上请检查 botId / secret'
               : bot?.wecom
                 ? (wecomProblem ?? '正在启动')
                 : bot
-                  ? 'bot.json 里没有 wecom 配置'
+                  ? '缺少配置：bot.json 里没有 wecom 配置'
                   : noConfig,
         },
         { key: 'polymarket', enabled: flags.polymarket, configured: null, active: flags.polymarket, problem: null },
       ];
     },
     stop() {
-      bots?.stop();
-      wecom?.service.stop();
-      bots = null;
+      stopBots?.();
+      wecom?.stop();
+      stopBots = null;
       wecom = null;
     },
   };

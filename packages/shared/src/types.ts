@@ -308,6 +308,8 @@ export interface AdminOverview {
   release: string | null;
   startedAt: number;
   restartAvailable: boolean;
+  /** Saved configuration differs from what this process started with. */
+  restartNeeded: boolean;
   features: FeatureState[];
   money: {
     users: number;
@@ -335,4 +337,39 @@ export interface AdminAuditEntry {
   action: string;
   detail: string;
   createdAt: number;
+}
+
+/** Site settings kept in the instance's .env. */
+export interface AdminSiteConfig {
+  /** Empty when registration needs no invite code. */
+  inviteCode: string;
+  privateMode: boolean;
+  startingBalance: number;
+  dailyBonus: number;
+  timezone: string;
+}
+
+/** What /admin shows of the saved configuration. Secrets only ever come back as a hint. */
+export interface AdminInstanceConfig {
+  /** Model settings shared by the AI bots and the WeCom chat; null while there is no bot.json. */
+  ai: {
+    endpoint: string;
+    model: string;
+    apiKeyHint: string;
+    bots: number;
+    marketsPerDay: number;
+    betsPerDay: number;
+    flipProbability: number;
+  } | null;
+  wecom: {
+    botId: string;
+    secretHint: string;
+    siteUrl: string;
+    siteName: string;
+    messagesPerHour: number;
+  } | null;
+  site: AdminSiteConfig;
+  /** Why the saved bot.json cannot be used, if it cannot. */
+  botError: string | null;
+  restartNeeded: boolean;
 }

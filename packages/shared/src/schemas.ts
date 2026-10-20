@@ -133,3 +133,46 @@ export const adminGrantAllSchema = z.object({
 export const adminUserSchema = z.object({
   username: z.string().trim().min(1, '请输入用户名'),
 });
+
+/** A secret field: left empty, the saved value stays. */
+const secretInput = z.string().trim().max(500, '太长了').optional();
+
+export const adminAiConfigSchema = z.object({
+  endpoint: z.string().trim().url('endpoint 不是有效的网址'),
+  apiKey: secretInput,
+  model: z.string().trim().min(1, '请填写模型名').max(100),
+  bots: z.number().int('机器人数量要是整数').min(1, '至少 1 个机器人').max(500, '最多 500 个机器人'),
+  marketsPerDay: z.number().min(0).max(100, '每天最多出 100 道题'),
+  betsPerDay: z.number().min(0).max(5000, '每天最多 5000 注'),
+  flipProbability: z.number().min(0, '押反概率在 0 到 1 之间').max(1, '押反概率在 0 到 1 之间'),
+});
+
+export const adminWecomConfigSchema = z.object({
+  botId: z.string().trim().min(1, '请填写 Bot ID').max(200),
+  secret: secretInput,
+  siteUrl: z.string().trim().url('网站地址无效，例如 https://ky-z.com/watercooler'),
+  siteName: z.string().trim().min(1, '请填写网站名称').max(40),
+  messagesPerHour: z.number().int().min(1, '至少 1 次').max(1000, '最多 1000 次'),
+});
+
+const isTimeZone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const adminSiteConfigSchema = z.object({
+  // Written into .env as is, so no spaces, quotes or comment marks.
+  inviteCode: z
+    .string()
+    .trim()
+    .max(64, '邀请码最多 64 个字符')
+    .regex(/^[^\s"'#\\]*$/, '邀请码不能包含空格、引号、# 或反斜杠'),
+  privateMode: z.boolean(),
+  startingBalance: z.number().min(0).max(MAX_BET, '金额过大'),
+  dailyBonus: z.number().min(0).max(MAX_BET, '金额过大'),
+  timezone: z.string().trim().min(1, '请填写时区').refine(isTimeZone, '时区无效，例如 Asia/Shanghai'),
+});
