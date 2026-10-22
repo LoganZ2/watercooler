@@ -8,6 +8,7 @@ import {
   type Outcome,
   type PricePoint,
   createMarketSchema,
+  MIN_MULTI_OUTCOMES,
   RESOLVE_GRACE_DAYS,
 } from '@watercooler/shared';
 import { placeholders, type DB } from '../db';
@@ -30,6 +31,8 @@ export interface MarketRow {
   resolution_note: string | null;
   pot: number;
   is_ai: 0 | 1;
+  /** Polymarket with 3+ options: each option has its own Yes/No book (see services/exchange). */
+  neg_risk: 0 | 1;
   ai_checked_at: number | null;
   created_at: number;
 }
@@ -98,18 +101,27 @@ const LIST_SELECT = `
     FROM markets m
     JOIN users u ON u.id = m.creator_id`;
 
+const QUOTE_ORDERS = `e.market_id = o.market_id AND e.status = 'open' AND (e.expires_at IS NULL OR e.expires_at > ?)`;
+const YES_SHARE = `(e.outcome_id = o.id AND e.token = 0)`;
+const NO_SHARE = `((mk.neg_risk = 1 AND e.outcome_id = o.id AND e.token = 1) OR (mk.neg_risk = 0 AND e.outcome_id <> o.id))`;
+
 /** Hydrate market rows with outcomes, probabilities and 24h change. */
 function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const outcomeRows = db
     .prepare(
+      // Best quotes for each option's Yes share, with the complementary share's orders folded in
+      // (the other option in binary markets, the option's No share in multi-outcome ones).
       `SELECT o.*,
-        (SELECT MAX(price) FROM exchange_orders WHERE market_id = o.market_id AND outcome_id = o.id AND status = 'open' AND side = 'buy') AS best_bid,
-        (SELECT MIN(price) FROM exchange_orders WHERE market_id = o.market_id AND outcome_id = o.id AND status = 'open' AND side = 'sell') AS best_ask
-      FROM outcomes o WHERE market_id IN (${placeholders(ids)}) ORDER BY market_id, idx`,
+        (SELECT MAX(CASE WHEN e.side = 'buy' THEN e.price ELSE 100 - e.price END) FROM exchange_orders e
+          WHERE ${QUOTE_ORDERS} AND ((${YES_SHARE} AND e.side = 'buy') OR (${NO_SHARE} AND e.side = 'sell'))) AS best_bid,
+        (SELECT MIN(CASE WHEN e.side = 'sell' THEN e.price ELSE 100 - e.price END) FROM exchange_orders e
+          WHERE ${QUOTE_ORDERS} AND ((${YES_SHARE} AND e.side = 'sell') OR (${NO_SHARE} AND e.side = 'buy'))) AS best_ask
+      FROM outcomes o JOIN markets mk ON mk.id = o.market_id
+      WHERE o.market_id IN (${placeholders(ids)}) ORDER BY o.market_id, o.idx`,
     )
-    .all(...ids) as (OutcomeRow & { best_bid: number | null; best_ask: number | null })[];
+    .all(now, now, ...ids) as (OutcomeRow & { best_bid: number | null; best_ask: number | null })[];
   const byMarket = new Map<number, (typeof outcomeRows)[number][]>();
   for (const o of outcomeRows) {
     const list = byMarket.get(o.market_id) ?? [];
@@ -319,12 +331,13 @@ export function createMarket(
   if (input.closeAt <= now + 5 * MINUTE) throw badRequest('截止时间至少要在 5 分钟之后');
   if (input.closeAt > now + 5 * 365 * DAY) throw badRequest('截止时间不能超过 5 年');
   const settleAt = input.settleAt ?? input.closeAt;
+  const multi = input.mode === 'polymarket' && input.outcomes.length >= MIN_MULTI_OUTCOMES;
   if (settleAt > now + 5 * 365 * DAY) throw badRequest('结算时间不能超过 5 年');
   return db.transaction(() => {
     const { lastInsertRowid } = db
       .prepare(
-        `INSERT INTO markets (question, description, category, creator_id, close_at, created_at, mode, settle_at, is_ai)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO markets (question, description, category, creator_id, close_at, created_at, mode, settle_at, is_ai, neg_risk)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.question,
@@ -336,10 +349,12 @@ export function createMarket(
         input.mode ?? 'pool',
         settleAt,
         opts.ai ? 1 : 0,
+        multi ? 1 : 0,
       );
     const marketId = Number(lastInsertRowid);
-    const insertOutcome = db.prepare('INSERT INTO outcomes (market_id, idx, label) VALUES (?, ?, ?)');
-    input.outcomes.forEach((label, i) => insertOutcome.run(marketId, i, label));
+    // Until anyone trades, every option of a multi-outcome market shows an even 1/N.
+    const insertOutcome = db.prepare('INSERT INTO outcomes (market_id, idx, label, mark_price) VALUES (?, ?, ?, ?)');
+    input.outcomes.forEach((label, i) => insertOutcome.run(marketId, i, label, multi ? 100 / input.outcomes.length : 50));
     recordPriceSnapshot(db, marketId, poolShares(input.outcomes.map(() => 0)), now);
     return marketId;
   })();

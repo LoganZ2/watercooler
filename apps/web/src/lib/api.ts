@@ -19,6 +19,8 @@ import type {
   UserProfile,
   ExchangeState,
   ExchangeOrder,
+  ExchangeActivity,
+  ExchangeHolder,
   OrderInput,
   WecomBinding,
   WecomBindRequest,
@@ -124,8 +126,13 @@ export const api = {
   exchange: (id: number) => get<ExchangeState>(`/markets/${id}/exchange`),
   order: (id: number, input: OrderInput) => post<ExchangeOrder>(`/markets/${id}/orders`, input),
   cancelOrder: (id: number, orderId: number) => post(`/markets/${id}/orders/${orderId}/cancel`),
-  splitMerge: (id: number, quantity: number, action: 'split' | 'merge') =>
-    post(`/markets/${id}/${action}`, { quantity }),
+  splitMerge: (id: number, quantity: number, action: 'split' | 'merge', outcomeId?: number) =>
+    post(`/markets/${id}/${action}`, { quantity, outcomeId }),
+  convert: (id: number, outcomeIds: number[], quantity: number) =>
+    post(`/markets/${id}/convert`, { outcomeIds, quantity }),
+  exchangeHolders: (id: number) => get<ExchangeHolder[]>(`/markets/${id}/exchange/holders`),
+  exchangeActivity: (id: number, before?: number) =>
+    get<ExchangeActivity[]>(`/markets/${id}/exchange/activity${qs({ before })}`),
   history: (id: number, range: HistoryRange) => get<PricePoint[]>(`/markets/${id}/history${qs({ range })}`),
   marketBets: (id: number) => get<Bet[]>(`/markets/${id}/bets`),
   holders: (id: number) => get<Holder[]>(`/markets/${id}/holders`),

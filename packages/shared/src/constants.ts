@@ -13,3 +13,18 @@ export const MAX_BET = 1_000_000;
 
 /** Pool markets refund after this many days without a result, measured from settleAt. */
 export const RESOLVE_GRACE_DAYS = 7;
+
+/**
+ * Polymarket order types. GTC rests until filled or cancelled; GTD also expires at a set time;
+ * FOK fills completely at once or not at all; FAK fills what it can at once and cancels the rest.
+ * Market orders are FOK/FAK orders whose limit is the worst acceptable price.
+ */
+export const ORDER_TYPES = ['GTC', 'GTD', 'FOK', 'FAK'] as const;
+export type OrderType = (typeof ORDER_TYPES)[number];
+
+/** Each option of a multi-outcome Polymarket market has its own Yes and No shares. */
+export const TOKENS = ['yes', 'no'] as const;
+export type Token = (typeof TOKENS)[number];
+
+/** Polymarket markets with this many options or more are multi-outcome (one Yes/No book per option). */
+export const MIN_MULTI_OUTCOMES = 3;

@@ -47,6 +47,38 @@ class ClientTests(unittest.TestCase):
         self.client.place_order(1, 2, "buy", ".4", 1)
         self.assertIs(json.loads(self.client._opener.open.call_args.args[0].data)["postOnly"], False)
 
+    def test_market_orders_gtd_and_convert_validate_before_sending(self):
+        bad = [
+            lambda: self.client.market_order(1, 2, "buy"),
+            lambda: self.client.market_order(1, 2, "buy", amount="1", quantity=1),
+            lambda: self.client.market_order(1, 2, "sell", amount="1"),
+            lambda: self.client.market_order(1, 2, "buy", amount="0.001"),
+            lambda: self.client.market_order(1, 2, "buy", amount=True),
+            lambda: self.client.market_order(1, 2, "buy", quantity=1, order_type="GTC"),
+            lambda: self.client.market_order(1, 2, "buy", quantity=1, token="maybe"),
+            lambda: self.client.place_order(1, 2, "buy", ".4", 1, order_type="GTD"),
+            lambda: self.client.place_order(1, 2, "buy", ".4", 1, expires_at=1),
+            lambda: self.client.place_order(1, 2, "buy", ".4", 1, order_type="FOK"),
+            lambda: self.client.convert(1, [], 1),
+        ]
+        for i, call in enumerate(bad):
+            with self.subTest(case=i), self.assertRaises(ValueError):
+                call()
+        self.client._opener.open.assert_not_called()
+        self.client._opener.open.return_value = BytesIO(b'{"id":1}')
+        self.client.market_order(1, 2, "buy", amount="12.50", worst_price=".6", token="no", client_order_id="m:1")
+        body = json.loads(self.client._opener.open.call_args.args[0].data)
+        self.assertEqual(body, {"marketId": 1, "outcomeId": 2, "side": "buy", "token": "no", "clientOrderId": "m:1",
+            "type": "FAK", "amount": 12.5, "price": 0.6})
+        self.client._opener.open.return_value = BytesIO(b'{"id":2}')
+        expires = datetime(2027, 1, 1, tzinfo=timezone.utc)
+        self.client.place_order(1, 2, "sell", ".4", 3, order_type="GTD", expires_at=expires)
+        body = json.loads(self.client._opener.open.call_args.args[0].data)
+        self.assertEqual((body["type"], body["expiresAt"]), ("GTD", int(expires.timestamp() * 1000)))
+        self.client._opener.open.return_value = BytesIO(b'{"ok":true}')
+        self.client.split(1, 5, outcome_id=7)
+        self.assertEqual(json.loads(self.client._opener.open.call_args.args[0].data), {"quantity": 5, "outcomeId": 7})
+
     def test_http_errors_retain_status_and_message(self):
         self.client._opener.open.side_effect = HTTPError("https://example.test", 409, "Conflict", {}, BytesIO(b'{"error":"duplicate key"}'))
         with self.assertRaises(APIError) as raised:

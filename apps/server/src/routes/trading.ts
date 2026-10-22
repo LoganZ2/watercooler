@@ -1,10 +1,11 @@
-import { orderSchema, shareAmountSchema } from '@watercooler/shared';
+import { convertSchema, orderSchema, shareAmountSchema, tradingOrderSchema } from '@watercooler/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireUser, type AppDeps, type AppEnv, type Ctx } from '../context';
 import { badRequest, parseBody, parseId } from '../lib/http';
 import {
   cancelOrder,
+  convertShares,
   exchangePortfolio,
   exchangePortfolioOrders,
   exchangeState,
@@ -48,7 +49,7 @@ export function tradingRoutes({ db, config, now }: AppDeps) {
   app.get('/trading/orders/:id', (c) => c.json(ownedOrder(db, requireUser(c).id, parseId(c.req.param('id')))));
   app.post('/trading/orders', async (c) => {
     const user = requireUser(c);
-    const input = await parseBody(c, orderSchema.extend({ marketId: z.number().int().positive() }));
+    const input = await parseBody(c, tradingOrderSchema);
     const order = placeOrder(db, user.id, input.marketId, input, now());
     return c.json(ownedOrder(db, user.id, order.id), 201);
   });
@@ -62,7 +63,7 @@ export function tradingRoutes({ db, config, now }: AppDeps) {
   app.get('/trading/trades', (c) => c.json(tradingFills(db, requireUser(c).id, query(c, pageQuery))));
   app.get('/trading/markets/:id/book', (c) => {
     const id = parseId(c.req.param('id'));
-    const state = exchangeState(db, id);
+    const state = exchangeState(db, id, now());
     return c.json({
       marketId: id,
       status: derivedStatus(getMarketRow(db, id), now()),
@@ -79,12 +80,22 @@ export function tradingRoutes({ db, config, now }: AppDeps) {
       const user = requireUser(c);
       const id = parseId(c.req.param('id'));
       const input = await parseBody(c, shareAmountSchema);
-      splitMerge(db, user.id, id, input.quantity, action, now());
+      splitMerge(db, user.id, id, input.quantity, action, now(), input.outcomeId);
       return c.json({
         balance: toMe(getUserById(db, user.id)!, config, now()).balance,
-        ...exchangeState(db, id, user.id),
+        ...exchangeState(db, id, now(), user.id),
       });
     });
   }
+  app.post('/trading/markets/:id/convert', async (c) => {
+    const user = requireUser(c);
+    const id = parseId(c.req.param('id'));
+    const input = await parseBody(c, convertSchema);
+    convertShares(db, user.id, id, input.outcomeIds, input.quantity, now());
+    return c.json({
+      balance: toMe(getUserById(db, user.id)!, config, now()).balance,
+      ...exchangeState(db, id, now(), user.id),
+    });
+  });
   return app;
 }

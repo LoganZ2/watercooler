@@ -101,12 +101,12 @@ describe('Polymarket exchange', () => {
     expect(await e.balance()).toBe(997.6);
   });
 
-  it('mints complementary buys with maker pricing without displaying implied sell orders', async () => {
+  it('mints complementary buys with maker pricing and shows them as implied asks', async () => {
     const e = await fixture();
     await e.order(e.bob, e.no, 'buy', 0.65, 4);
     expect((await e.state()).books).toEqual([
-      { outcomeId: e.yes, bids: [], asks: [], lastPrice: null },
-      { outcomeId: e.no, bids: [{ price: 0.65, quantity: 4 }], asks: [], lastPrice: null },
+      { outcomeId: e.yes, token: 'yes', bids: [], asks: [{ price: 0.35, quantity: 4 }], lastPrice: null },
+      { outcomeId: e.no, token: 'yes', bids: [{ price: 0.65, quantity: 4 }], asks: [], lastPrice: null },
     ]);
     const incoming = await e.order(e.alice, e.yes, 'buy', 0.5, 6);
     expect(incoming.body.remaining).toBe(2);
@@ -119,7 +119,7 @@ describe('Polymarket exchange', () => {
     expect((await e.state()).positions.find((p: any) => p.outcomeId === e.yes).quantity).toBe(4);
   });
 
-  it('exposes actual best quotes in market summaries without inventing prices for empty or closed books', async () => {
+  it('exposes best quotes, including complementary orders, without inventing prices for empty or closed books', async () => {
     const e = await fixture();
     const quotes = (market: any) => market.outcomes.map(({ bestBid, bestAsk }: any) => [bestBid, bestAsk]);
     const empty = [
@@ -129,7 +129,7 @@ describe('Polymarket exchange', () => {
     expect(quotes((await e.alice.get(e.base)).body.market)).toEqual(empty);
     await e.order(e.bob, e.no, 'buy', 0.52, 10);
     expect(quotes((await e.alice.get(e.base)).body.market)).toEqual([
-      [null, null],
+      [null, 0.48],
       [0.52, null],
     ]);
     await e.bob.post(`${e.base}/split`, { quantity: 10 });
@@ -138,22 +138,22 @@ describe('Polymarket exchange', () => {
     await e.order(e.alice, e.yes, 'buy', 0.3, 4);
     const bid = (await e.order(e.carol, e.yes, 'buy', 0.4, 2)).body;
     const expected = [
-      [0.4, 0.55],
-      [0.52, null],
+      [0.4, 0.48],
+      [0.52, 0.6],
     ];
     expect(quotes((await e.alice.get(e.base)).body.market)).toEqual(expected);
     expect(quotes((await e.alice.get('/markets?mode=polymarket')).body[0])).toEqual(expected);
     await e.bob.post(`${e.base}/orders/${bestAsk.id}/cancel`);
     await e.carol.post(`${e.base}/orders/${bid.id}/cancel`);
     expect(quotes((await e.alice.get(e.base)).body.market)).toEqual([
-      [0.3, 0.6],
-      [0.52, null],
+      [0.3, 0.48],
+      [0.52, 0.7],
     ]);
     e.clock.now += 86400000;
     expect(quotes((await e.alice.get(e.base)).body.market)).toEqual(empty);
   });
 
-  it('shows only actual remaining orders, aggregated and sorted, in both book endpoints', async () => {
+  it('shows remaining orders with complementary liquidity folded in, aggregated and sorted, in both book endpoints', async () => {
     const e = await fixture();
     await e.bob.post(`${e.base}/split`, { quantity: 20 });
     await e.order(e.bob, e.no, 'sell', 0.6, 7);
@@ -167,23 +167,32 @@ describe('Polymarket exchange', () => {
     await e.order(e.alice, e.yes, 'buy', 0.48, 1);
     const cancelled = (await e.order(e.bob, e.yes, 'buy', 0.3, 1)).body;
     await e.bob.post(`${e.base}/orders/${cancelled.id}/cancel`);
+    // A No sell at p is a Yes bid at 1 − p, a No buy is a Yes ask, and the other way round.
     const expected = [
       {
         outcomeId: e.yes,
+        token: 'yes',
         bids: [
           { price: 0.45, quantity: 2 },
-          { price: 0.4, quantity: 9 },
+          { price: 0.4, quantity: 16 },
         ],
         asks: [
-          { price: 0.48, quantity: 6 },
+          { price: 0.48, quantity: 10 },
           { price: 0.7, quantity: 2 },
         ],
         lastPrice: 0.48,
       },
       {
         outcomeId: e.no,
-        bids: [{ price: 0.52, quantity: 4 }],
-        asks: [{ price: 0.6, quantity: 7 }],
+        token: 'yes',
+        bids: [
+          { price: 0.52, quantity: 10 },
+          { price: 0.3, quantity: 2 },
+        ],
+        asks: [
+          { price: 0.55, quantity: 2 },
+          { price: 0.6, quantity: 16 },
+        ],
         lastPrice: 0.52,
       },
     ];
@@ -449,10 +458,10 @@ describe('Polymarket exchange', () => {
     expect((await e.state()).trades).toEqual([]);
     expect((await e.state()).collateral).toBe(0);
     const invalid = await e.alice.post('/markets', {
-      question: '无效的三个选项',
+      question: '两个选项必须是 Yes / No',
       category: '生活',
       mode: 'polymarket',
-      outcomes: ['Yes', 'No', 'Maybe'],
+      outcomes: ['Yes', 'Maybe'],
       closeAt: e.clock.now + 86400000,
     });
     expect(invalid.status).toBe(400);

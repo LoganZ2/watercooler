@@ -137,6 +137,42 @@ class TradingIntegrationTests(unittest.TestCase):
             seller.cancel_market(pool)
             self.assertEqual(seller.market(pool)["market"]["status"], "cancelled")
 
+    def test_market_orders_and_multi_outcome_markets(self):
+        with WatercoolerClient(self.url) as maker, WatercoolerClient(self.url) as taker:
+            maker.register("sdk_mm", "secret123")
+            taker.register("sdk_taker", "secret123")
+            now = maker._request("POST", "/__test/advance")["now"]
+            market_id = maker.create_market("SDK 验证：谁会拿到年度最佳？", now + 86400000, outcomes=["甲", "乙", "丙"])["id"]
+            a, b, c = [o["id"] for o in taker.market(market_id)["market"]["outcomes"]]
+            self.assertEqual([(x["outcomeId"], x["token"]) for x in maker.book(market_id)["books"]],
+                [(a, "yes"), (a, "no"), (b, "yes"), (b, "no"), (c, "yes"), (c, "no")])
+            with self.assertRaises(APIError) as missing:
+                maker.split(market_id, 10)
+            self.assertEqual(missing.exception.status, 400)
+            maker.split(market_id, 10, outcome_id=a)
+            maker.place_order(market_id, a, "sell", ".40", 10)
+            gtd = maker.place_order(market_id, a, "sell", ".70", 10, token="no", order_type="GTD", expires_at=now + 3600000)
+            self.assertEqual((gtd["type"], gtd["token"], gtd["expiresAt"]), ("GTD", "no", now + 3600000))
+
+            bought = taker.market_order(market_id, a, "buy", amount="2.00", client_order_id="mkt-a")
+            self.assertEqual((bought["quantity"], bought["status"], bought["type"]), (5, "filled", "FAK"))
+            self.assertEqual(taker.market_order(market_id, a, "buy", amount="2.00", client_order_id="mkt-a")["id"], bought["id"])
+            with self.assertRaises(APIError) as fok:
+                taker.market_order(market_id, a, "buy", quantity=50, order_type="FOK")
+            self.assertEqual(fok.exception.status, 409)
+            taker.market_order(market_id, a, "buy", quantity=4, token="no", worst_price=".70")
+
+            converted = taker.convert(market_id, [a], 4)
+            held = {(p["outcomeId"], p["token"]): p["quantity"] for p in converted["positions"]}
+            self.assertEqual((held[(a, "no")], held[(b, "yes")], held[(c, "yes")]), (0, 4, 4))
+            self.assertEqual(maker.holders(market_id)[0]["user"]["username"], "sdk_mm")
+            latest = maker.activity(market_id)[0]
+            self.assertEqual((latest["user"]["username"], latest["side"], latest["token"], latest["price"]),
+                ("sdk_taker", "buy", "no", Decimal(".7")))
+            positions = {(p["outcomeId"], p["token"]): p for p in taker.positions()}
+            self.assertEqual(positions[(a, "yes")]["avgPrice"], Decimal(".4"))
+            self.assertEqual(positions[(b, "yes")]["outcomeLabel"], "乙 · Yes")
+
 
 if __name__ == "__main__":
     unittest.main()

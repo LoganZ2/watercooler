@@ -16,6 +16,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from uuid import uuid4
 
 Side = Literal["buy", "sell"]
+Token = Literal["yes", "no"]
 JSON = dict[str, Any]
 
 
@@ -56,6 +57,33 @@ def _price(value: Decimal | str | float) -> float:
     except InvalidOperation as exc:
         raise ValueError("invalid price") from exc
     return float(price)
+
+
+def _amount(value: Decimal | str | float) -> float:
+    if isinstance(value, bool):
+        raise ValueError("amount must be 0.01–1000000 in increments of 0.01")
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite() or not Decimal("0.01") <= amount <= Decimal("1000000") or amount * 100 != (amount * 100).to_integral_value():
+            raise ValueError("amount must be 0.01–1000000 in increments of 0.01")
+    except InvalidOperation as exc:
+        raise ValueError("invalid amount") from exc
+    return float(amount)
+
+
+def _timestamp(value: int | datetime, name: str) -> int:
+    if isinstance(value, datetime):
+        if value.utcoffset() is None:
+            raise ValueError(f"{name} datetime must include a timezone")
+        value = int(value.timestamp() * 1000)
+    return _integer(value, name)
+
+
+def _client_order_id(client_order_id: str | None) -> str:
+    key = uuid4().hex if client_order_id is None else client_order_id
+    if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", key):
+        raise ValueError("invalid client_order_id")
+    return key
 
 
 class WatercoolerClient:
@@ -144,15 +172,9 @@ class WatercoolerClient:
         return self._request("GET", f"/markets/{_integer(market_id, 'market_id')}")
 
     def create_market(self, question: str, close_at: int | datetime, *, settle_at: int | datetime | None = None, category: str = "其他", description: str = "", mode: Literal["pool", "polymarket"] = "polymarket", outcomes: list[str] | None = None) -> JSON:
-        def timestamp(value: int | datetime, name: str) -> int:
-            if isinstance(value, datetime):
-                if value.utcoffset() is None:
-                    raise ValueError(f"{name} datetime must include a timezone")
-                value = int(value.timestamp() * 1000)
-            return _integer(value, name)
-
-        close_ms = timestamp(close_at, "close_at")
-        settle_ms = close_ms if settle_at is None else timestamp(settle_at, "settle_at")
+        """Polymarket markets take ["Yes", "No"] (the default) or 3+ options, each with its own Yes/No book."""
+        close_ms = _timestamp(close_at, "close_at")
+        settle_ms = close_ms if settle_at is None else _timestamp(settle_at, "settle_at")
         if settle_ms < close_ms:
             raise ValueError("settle_at must be at or after close_at")
         return self._request("POST", "/markets", {"question": question, "closeAt": close_ms, "settleAt": settle_ms, "category": category,
@@ -184,16 +206,46 @@ class WatercoolerClient:
         items = self.orders(client_order_id=client_order_id, limit=1)["items"]
         return items[0] if items else None
 
-    def place_order(self, market_id: int, outcome_id: int, side: Side, price: Decimal | str | float, quantity: int, *, client_order_id: str | None = None, post_only: bool = False) -> JSON:
+    def place_order(self, market_id: int, outcome_id: int, side: Side, price: Decimal | str | float, quantity: int, *, token: Token = "yes", order_type: Literal["GTC", "GTD"] = "GTC", expires_at: int | datetime | None = None, client_order_id: str | None = None, post_only: bool = False) -> JSON:
+        """A resting limit order. GTD orders need `expires_at`; the unfilled rest is cancelled then."""
         if not isinstance(post_only, bool):
             raise ValueError("post_only must be a bool")
-        key = uuid4().hex if client_order_id is None else client_order_id
-        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", key):
-            raise ValueError("invalid client_order_id")
+        if order_type not in ("GTC", "GTD"):
+            raise ValueError("order_type must be GTC or GTD; use market_order for FOK/FAK")
+        if (order_type == "GTD") != (expires_at is not None):
+            raise ValueError("expires_at is required for GTD orders and only allowed for them")
+        body = {"price": _price(price), "quantity": _integer(quantity, "quantity", 1_000_000), "postOnly": post_only, "type": order_type}
+        if expires_at is not None:
+            body["expiresAt"] = _timestamp(expires_at, "expires_at")
+        return self._submit(market_id, outcome_id, side, token, body, client_order_id)
+
+    def market_order(self, market_id: int, outcome_id: int, side: Side, *, amount: Decimal | str | float | None = None, quantity: int | None = None, worst_price: Decimal | str | float | None = None, token: Token = "yes", order_type: Literal["FOK", "FAK"] = "FAK", client_order_id: str | None = None) -> JSON:
+        """Execute at once against the book, never resting. Buys spend `amount` (in whole shares) or take
+        `quantity`; sells take `quantity`. FOK fills completely or not at all, FAK cancels the unfilled rest.
+        `worst_price` bounds the prices touched (defaults: 0.99 for buys, 0.01 for sells)."""
+        if order_type not in ("FOK", "FAK"):
+            raise ValueError("order_type must be FOK or FAK")
+        if (amount is None) == (quantity is None):
+            raise ValueError("pass exactly one of amount and quantity")
+        if amount is not None and side != "buy":
+            raise ValueError("amount is only for buys; sell a quantity")
+        body: JSON = {"type": order_type}
+        if amount is not None:
+            body["amount"] = _amount(amount)
+        if quantity is not None:
+            body["quantity"] = _integer(quantity, "quantity", 1_000_000)
+        if worst_price is not None:
+            body["price"] = _price(worst_price)
+        return self._submit(market_id, outcome_id, side, token, body, client_order_id)
+
+    def _submit(self, market_id: int, outcome_id: int, side: Side, token: Token, fields: JSON, client_order_id: str | None) -> JSON:
+        key = _client_order_id(client_order_id)
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
+        if token not in ("yes", "no"):
+            raise ValueError("token must be yes or no")
         body = {"marketId": _integer(market_id, "market_id"), "outcomeId": _integer(outcome_id, "outcome_id"), "side": side,
-            "price": _price(price), "quantity": _integer(quantity, "quantity", 1_000_000), "clientOrderId": key, "postOnly": post_only}
+            "token": token, "clientOrderId": key, **fields}
         try:
             return self._request("POST", "/trading/orders", body)
         except (TransportError, ProtocolError) as exc:
@@ -210,11 +262,34 @@ class WatercoolerClient:
     def market_trades(self, market_id: int, *, limit: int = 50, before: int | None = None) -> JSON:
         return self._request("GET", f"/trading/markets/{_integer(market_id, 'market_id')}/trades", query=self._page(limit, before))
 
-    def split(self, market_id: int, quantity: int) -> JSON:
-        return self._request("POST", f"/trading/markets/{_integer(market_id, 'market_id')}/split", {"quantity": _integer(quantity, "quantity", 1_000_000)})
+    def _pairs(self, action: str, market_id: int, quantity: int, outcome_id: int | None) -> JSON:
+        body: JSON = {"quantity": _integer(quantity, "quantity", 1_000_000)}
+        if outcome_id is not None:
+            body["outcomeId"] = _integer(outcome_id, "outcome_id")
+        return self._request("POST", f"/trading/markets/{_integer(market_id, 'market_id')}/{action}", body)
 
-    def merge(self, market_id: int, quantity: int) -> JSON:
-        return self._request("POST", f"/trading/markets/{_integer(market_id, 'market_id')}/merge", {"quantity": _integer(quantity, "quantity", 1_000_000)})
+    def split(self, market_id: int, quantity: int, *, outcome_id: int | None = None) -> JSON:
+        """1 → 1 Yes + 1 No. Multi-outcome markets name the option (`outcome_id`)."""
+        return self._pairs("split", market_id, quantity, outcome_id)
+
+    def merge(self, market_id: int, quantity: int, *, outcome_id: int | None = None) -> JSON:
+        return self._pairs("merge", market_id, quantity, outcome_id)
+
+    def convert(self, market_id: int, outcome_ids: list[int], quantity: int) -> JSON:
+        """Multi-outcome markets: No shares of k options → (k − 1) cash + one Yes of every other option, per unit."""
+        if not isinstance(outcome_ids, list) or not outcome_ids:
+            raise ValueError("outcome_ids must be a non-empty list")
+        body = {"outcomeIds": [_integer(i, "outcome_id") for i in outcome_ids], "quantity": _integer(quantity, "quantity", 1_000_000)}
+        return self._request("POST", f"/trading/markets/{_integer(market_id, 'market_id')}/convert", body)
+
+    def holders(self, market_id: int) -> list[JSON]:
+        """Biggest holders of each share, with their average price."""
+        return self._request("GET", f"/markets/{_integer(market_id, 'market_id')}/exchange/holders")
+
+    def activity(self, market_id: int, *, before: int | None = None) -> list[JSON]:
+        """Both sides of the market's trades, newest first; page with the last `tradeId` as `before`."""
+        return self._request("GET", f"/markets/{_integer(market_id, 'market_id')}/exchange/activity",
+            query={"before": None if before is None else _integer(before, "before")})
 
     def resolve_market(self, market_id: int, outcome_id: int, *, note: str = "") -> JSON:
         return self._request("POST", f"/markets/{_integer(market_id, 'market_id')}/resolve", {"outcomeId": _integer(outcome_id, "outcome_id"), "note": note})

@@ -345,4 +345,71 @@ export const migrations: string[] = [
   DROP TABLE old_ledger;
   CREATE INDEX ledger_user ON ledger(user_id, id);
   `,
+  /* 10: Polymarket parity.
+        - Order types: GTD orders expire at expires_at; FOK/FAK orders execute at once (market
+          orders) and never rest; FOK/FAK buys may name an amount to spend instead of shares.
+        - Multi-outcome markets (neg_risk): each option has its own Yes (token 0) and No (token 1)
+          share with its own book; binary markets keep using token 0 of their Yes and No options.
+        - Positions keep their average-cost basis (display only), backfilled from past fills and
+          splits at 0.50 per share.
+        - WeCom confirmation cards can place and cancel orders. */ `
+  ALTER TABLE markets ADD COLUMN neg_risk INTEGER NOT NULL DEFAULT 0 CHECK (neg_risk IN (0, 1));
+
+  ALTER TABLE exchange_orders ADD COLUMN token INTEGER NOT NULL DEFAULT 0 CHECK (token IN (0, 1));
+  ALTER TABLE exchange_orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'GTC'
+    CHECK (order_type IN ('GTC', 'GTD', 'FOK', 'FAK'));
+  ALTER TABLE exchange_orders ADD COLUMN expires_at INTEGER;
+  ALTER TABLE exchange_orders ADD COLUMN amount INTEGER CHECK (amount > 0);
+  DROP INDEX exchange_orders_book;
+  CREATE INDEX exchange_orders_book ON exchange_orders(market_id, status, outcome_id, token, side, price, id);
+  CREATE INDEX exchange_orders_expiry ON exchange_orders(expires_at) WHERE status = 'open' AND expires_at IS NOT NULL;
+  ALTER TABLE exchange_trades ADD COLUMN token INTEGER NOT NULL DEFAULT 0 CHECK (token IN (0, 1));
+
+  ALTER TABLE exchange_positions RENAME TO old_exchange_positions;
+  CREATE TABLE exchange_positions (
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    outcome_id INTEGER NOT NULL REFERENCES outcomes(id),
+    market_id  INTEGER NOT NULL REFERENCES markets(id),
+    token      INTEGER NOT NULL DEFAULT 0 CHECK (token IN (0, 1)),
+    quantity   INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    reserved   INTEGER NOT NULL DEFAULT 0 CHECK (reserved >= 0 AND reserved <= quantity),
+    cost       INTEGER NOT NULL DEFAULT 0 CHECK (cost >= 0),
+    PRIMARY KEY (user_id, outcome_id, token)
+  );
+  INSERT INTO exchange_positions (user_id, outcome_id, market_id, token, quantity, reserved)
+    SELECT user_id, outcome_id, market_id, 0, quantity, reserved FROM old_exchange_positions;
+  DROP TABLE old_exchange_positions;
+  CREATE INDEX exchange_positions_market ON exchange_positions(market_id);
+
+  CREATE TEMP TABLE cost_basis AS
+    SELECT user_id, outcome_id, SUM(q) AS q, SUM(c) AS c FROM (
+      SELECT e.user_id, e.outcome_id, t.quantity AS q,
+             t.quantity * CASE WHEN t.outcome_id = e.outcome_id THEN t.price ELSE 100 - t.price END AS c
+        FROM exchange_trades t JOIN exchange_orders e ON e.id = t.maker_id OR e.id = t.taker_id
+       WHERE e.side = 'buy'
+      UNION ALL
+      SELECT l.user_id, o.id, -l.amount / 100, -l.amount / 2
+        FROM ledger l JOIN outcomes o ON o.market_id = l.market_id
+       WHERE l.kind = 'split'
+    ) GROUP BY user_id, outcome_id;
+  UPDATE exchange_positions SET cost = COALESCE((
+    SELECT CAST(ROUND(b.c * 1.0 * exchange_positions.quantity / b.q) AS INTEGER) FROM cost_basis b
+     WHERE b.user_id = exchange_positions.user_id AND b.outcome_id = exchange_positions.outcome_id AND b.q > 0
+  ), 0);
+  DROP TABLE cost_basis;
+
+  ALTER TABLE wecom_actions RENAME TO old_wecom_actions;
+  CREATE TABLE wecom_actions (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    wecom_userid TEXT    NOT NULL,
+    kind         TEXT    NOT NULL CHECK (kind IN ('bet', 'create', 'resolve', 'cancel', 'order', 'cancel_order')),
+    payload      TEXT    NOT NULL,
+    task_id      TEXT    NOT NULL UNIQUE,
+    status       TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed', 'cancelled')),
+    created_at   INTEGER NOT NULL
+  );
+  INSERT INTO wecom_actions SELECT * FROM old_wecom_actions;
+  DROP TABLE old_wecom_actions;
+  `,
 ];

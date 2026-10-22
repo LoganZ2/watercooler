@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { MAX_BET, MAX_OUTCOMES, MIN_BET, MIN_OUTCOMES } from './constants';
+import {
+  MAX_BET,
+  MAX_OUTCOMES,
+  MIN_BET,
+  MIN_MULTI_OUTCOMES,
+  MIN_OUTCOMES,
+  ORDER_TYPES,
+  TOKENS,
+} from './constants';
 
 const username = z
   .string()
@@ -53,9 +61,12 @@ export const createMarketSchema = z
     path: ['settleAt'],
   })
   .refine(
-    (v) => v.mode !== 'polymarket' || (v.outcomes.length === 2 && v.outcomes[0] === 'Yes' && v.outcomes[1] === 'No'),
+    (v) =>
+      v.mode !== 'polymarket' ||
+      v.outcomes.length >= MIN_MULTI_OUTCOMES ||
+      (v.outcomes.length === 2 && v.outcomes[0] === 'Yes' && v.outcomes[1] === 'No'),
     {
-      message: 'Polymarket 模式必须使用 Yes / No 两个选项',
+      message: `Polymarket 是非题用 Yes / No 两个选项，多选题至少 ${MIN_MULTI_OUTCOMES} 个选项`,
       path: ['outcomes'],
     },
   )
@@ -72,8 +83,35 @@ export const betSchema = z.object({
 export type BetInput = z.infer<typeof betSchema>;
 
 // Whole shares and integer-cent prices keep every fill and collateral movement exact.
-export const shareAmountSchema = z.object({ quantity: z.number().int().min(1).max(1_000_000) });
-export const orderSchema = shareAmountSchema.extend({
+const shares = z.number().int().min(1).max(1_000_000);
+const wholeCents = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-8;
+const price = z.number().min(0.01).max(0.99).refine(wholeCents, '价格精确到 0.01');
+const outcomeId = z.number().int().positive();
+
+/** Split or merge complete sets; multi-outcome markets name the option whose Yes/No pair it is. */
+export const shareAmountSchema = z.object({ quantity: shares, outcomeId: outcomeId.optional() });
+
+/** Turn No shares of some options into Yes shares of every other option (multi-outcome markets). */
+export const convertSchema = z.object({
+  quantity: shares,
+  outcomeIds: z.array(outcomeId).min(1, '至少选一个选项').max(MAX_OUTCOMES),
+});
+
+const orderObject = z.object({
+  outcomeId,
+  /** Which share of the option: yes (default) or no. Binary markets may also name the No outcome. */
+  token: z.enum(TOKENS).optional(),
+  side: z.enum(['buy', 'sell']),
+  /** GTC (default) and GTD rest on the book; FOK and FAK execute at once (market orders). */
+  type: z.enum(ORDER_TYPES).optional(),
+  /** Limit price; for FOK/FAK the worst acceptable price (defaults to 0.99 for buys, 0.01 for sells). */
+  price: price.optional(),
+  /** Shares to trade. */
+  quantity: shares.optional(),
+  /** Instead of shares: spend up to this much on a FOK/FAK buy, in whole shares. */
+  amount: z.number().min(0.01).max(MAX_BET).refine(wholeCents, '金额精确到 0.01').optional(),
+  /** GTD only: when the unfilled rest is cancelled (ms). */
+  expiresAt: z.number().int().positive().optional(),
   postOnly: z.boolean().optional(),
   clientOrderId: z
     .string()
@@ -81,14 +119,21 @@ export const orderSchema = shareAmountSchema.extend({
     .max(64)
     .regex(/^[A-Za-z0-9._:-]+$/)
     .optional(),
-  outcomeId: z.number().int().positive(),
-  side: z.enum(['buy', 'sell']),
-  price: z
-    .number()
-    .min(0.01)
-    .max(0.99)
-    .refine((p) => Math.abs(p * 100 - Math.round(p * 100)) < 1e-8, '价格精确到 0.01'),
 });
+
+function orderRules(v: z.infer<typeof orderObject>, ctx: z.RefinementCtx) {
+  const type = v.type ?? 'GTC';
+  const immediate = type === 'FOK' || type === 'FAK';
+  const issue = (message: string, path: string) => ctx.addIssue({ code: 'custom', message, path: [path] });
+  if ((v.quantity === undefined) === (v.amount === undefined)) issue('份数和金额要填且只填一个', 'quantity');
+  if (v.amount !== undefined && !(immediate && v.side === 'buy')) issue('按金额下单只能用于市价买入', 'amount');
+  if (!immediate && v.price === undefined) issue('限价单需要填写价格', 'price');
+  if ((type === 'GTD') !== (v.expiresAt !== undefined)) issue('只有 GTD 订单需要（也必须）设置到期时间', 'expiresAt');
+  if (v.postOnly && immediate) issue('Post-only 只能用于挂单（GTC / GTD）', 'postOnly');
+}
+
+export const orderSchema = orderObject.superRefine(orderRules);
+export const tradingOrderSchema = orderObject.extend({ marketId: z.number().int().positive() }).superRefine(orderRules);
 export type OrderInput = z.infer<typeof orderSchema>;
 
 export const resolveMarketSchema = z.object({

@@ -78,4 +78,48 @@ describe('upstream and Polymarket database upgrades', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it('backfills Polymarket cost basis from past fills and splits', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wc-migrate-'));
+    const path = join(dir, 'db.sqlite');
+    let db = new Database(path);
+    try {
+      for (const migration of migrations.slice(0, 9)) db.exec(migration);
+      db.pragma('user_version = 9');
+      db.exec(`
+        INSERT INTO users(id,username,display_name,password_hash,balance,created_at)
+          VALUES (1,'a','a','h',0,0),(2,'b','b','h',0,0),(3,'c','c','h',0,0);
+        INSERT INTO markets(id,question,category,creator_id,close_at,pot,created_at,mode) VALUES (2,'x','生活',1,200,1200,0,'polymarket');
+        INSERT INTO outcomes(id,market_id,idx,label) VALUES (3,2,0,'Yes'),(4,2,1,'No');
+        INSERT INTO ledger(user_id,kind,amount,balance_after,market_id,created_at) VALUES (1,'split',-1000,0,2,0);
+        INSERT INTO exchange_orders(id,user_id,market_id,outcome_id,side,price,quantity,remaining,status,created_at) VALUES
+          (1,1,2,3,'sell',60,4,0,'filled',1),(2,2,2,3,'buy',60,4,0,'filled',1),
+          (3,3,2,4,'buy',70,2,0,'filled',2),(4,2,2,3,'buy',30,2,0,'filled',2);
+        INSERT INTO exchange_trades(market_id,outcome_id,maker_id,taker_id,price,quantity,kind,created_at) VALUES
+          (2,3,1,2,60,4,'transfer',1),(2,3,3,4,30,2,'mint',2);
+        INSERT INTO exchange_positions(user_id,market_id,outcome_id,quantity,reserved) VALUES
+          (1,2,3,6,0),(1,2,4,10,0),(2,2,3,6,0),(3,2,4,2,0);
+      `);
+      db.close();
+      db = openDatabase(path);
+      expect(
+        db.prepare('SELECT user_id,outcome_id,token,quantity,cost FROM exchange_positions ORDER BY user_id,outcome_id').all(),
+      ).toEqual([
+        { user_id: 1, outcome_id: 3, token: 0, quantity: 6, cost: 300 },
+        { user_id: 1, outcome_id: 4, token: 0, quantity: 10, cost: 500 },
+        { user_id: 2, outcome_id: 3, token: 0, quantity: 6, cost: 300 },
+        { user_id: 3, outcome_id: 4, token: 0, quantity: 2, cost: 140 },
+      ]);
+      expect(db.prepare('SELECT neg_risk FROM markets').get()).toEqual({ neg_risk: 0 });
+      expect(db.prepare('SELECT token,order_type,expires_at,amount FROM exchange_orders WHERE id = 1').get()).toEqual({
+        token: 0,
+        order_type: 'GTC',
+        expires_at: null,
+        amount: null,
+      });
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      if (db.open) db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

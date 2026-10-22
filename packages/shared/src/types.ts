@@ -1,4 +1,6 @@
 // API data-transfer objects shared by server and web.
+import type { OrderType, Token } from './constants';
+
 // Money amounts are expressed in currency units (2 decimal places); timestamps are unix ms.
 
 export interface UserRef {
@@ -191,25 +193,44 @@ export interface Portfolio {
 
 export interface ExchangePosition {
   outcomeId: number;
+  /** For multi-outcome markets, the option's Yes or No share; binary markets always say yes. */
+  token: Token;
   quantity: number;
   reserved: number;
+  /** Cost basis of the shares held (average cost), in currency units. */
+  cost: number;
+  /** cost / quantity, or null without shares. */
+  avgPrice: number | null;
 }
 export interface ExchangePortfolioPosition extends ExchangePosition {
   marketId: number;
   question: string;
+  /** The option's label, with Yes / No appended for multi-outcome markets. */
   outcomeLabel: string;
   status: MarketStatus;
+  /** Current mark price of this share (1 or 0 once settled). */
   price: number;
+  /** quantity × price: an estimate for display only, never counted in rankings. */
+  value: number;
+  /** value - cost, display only. */
+  pnl: number;
 }
 export interface ExchangeOrder {
   postOnly: boolean;
   clientOrderId: string | null;
   id: number;
   outcomeId: number;
+  token: Token;
   side: 'buy' | 'sell';
+  type: OrderType;
+  /** Limit price; for FOK/FAK orders the worst acceptable price. */
   price: number;
   quantity: number;
   remaining: number;
+  /** FOK/FAK buys placed by amount: how much was offered. */
+  amount: number | null;
+  /** GTD orders: when the unfilled rest is cancelled. */
+  expiresAt: number | null;
   status: 'open' | 'filled' | 'cancelled';
   createdAt: number;
 }
@@ -222,19 +243,53 @@ export interface BookLevel {
   price: number;
   quantity: number;
 }
+/**
+ * One share's order book. Liquidity on the complementary share is folded in, the way Polymarket
+ * shows it: a No bid at 0.40 is a Yes ask at 0.60, and fills against Yes buyers by minting.
+ */
+export interface ExchangeBook {
+  outcomeId: number;
+  token: Token;
+  bids: BookLevel[];
+  asks: BookLevel[];
+  lastPrice: number | null;
+}
+export interface ExchangeTrade {
+  id: number;
+  outcomeId: number;
+  token: Token;
+  price: number;
+  quantity: number;
+  kind: 'transfer' | 'mint' | 'merge';
+  createdAt: number;
+}
 export interface ExchangeState {
   collateral: number;
-  books: { outcomeId: number; bids: BookLevel[]; asks: BookLevel[]; lastPrice: number | null }[];
+  books: ExchangeBook[];
   positions: ExchangePosition[];
   orders: ExchangeOrder[];
-  trades: {
-    id: number;
-    outcomeId: number;
-    price: number;
-    quantity: number;
-    kind: 'transfer' | 'mint' | 'merge';
-    createdAt: number;
-  }[];
+  trades: ExchangeTrade[];
+}
+
+/** One side of a trade, for a market's public activity feed. */
+export interface ExchangeActivity {
+  tradeId: number;
+  user: UserRef;
+  side: 'buy' | 'sell';
+  outcomeId: number;
+  token: Token;
+  price: number;
+  quantity: number;
+  createdAt: number;
+}
+
+/** A Polymarket market's biggest holders of one share. */
+export interface ExchangeHolder {
+  user: UserRef;
+  outcomeId: number;
+  token: Token;
+  quantity: number;
+  avgPrice: number | null;
 }
 
 export interface UserProfile {

@@ -5,6 +5,7 @@ import {
   createMarketSchema,
   fromCents,
   resolveMarketSchema,
+  convertSchema,
   orderSchema,
   shareAmountSchema,
   type BetResult,
@@ -28,7 +29,15 @@ import {
   type MarketZone,
 } from '../services/markets';
 import { getUserById } from '../services/users';
-import { exchangeState, placeOrder, cancelOrder, splitMerge } from '../services/exchange';
+import {
+  cancelOrder,
+  convertShares,
+  exchangeActivity,
+  exchangeHolders,
+  exchangeState,
+  placeOrder,
+  splitMerge,
+} from '../services/exchange';
 
 const pick = <T extends string>(value: string | undefined, allowed: readonly T[], fallback: T): T =>
   allowed.includes(value as T) ? (value as T) : fallback;
@@ -36,7 +45,14 @@ const pick = <T extends string>(value: string | undefined, allowed: readonly T[]
 export function marketRoutes({ db, now }: AppDeps) {
   const app = new Hono<AppEnv>();
 
-  app.get('/markets/:id/exchange', (c) => c.json(exchangeState(db, parseId(c.req.param('id')), c.get('user')?.id)));
+  app.get('/markets/:id/exchange', (c) =>
+    c.json(exchangeState(db, parseId(c.req.param('id')), now(), c.get('user')?.id)),
+  );
+  app.get('/markets/:id/exchange/holders', (c) => c.json(exchangeHolders(db, parseId(c.req.param('id')))));
+  app.get('/markets/:id/exchange/activity', (c) => {
+    const before = Number(c.req.query('before')) || undefined;
+    return c.json(exchangeActivity(db, parseId(c.req.param('id')), { before, limit: 50 }));
+  });
   app.post('/markets/:id/orders', async (c) => {
     const user = requireUser(c);
     const input = await parseBody(c, orderSchema);
@@ -51,10 +67,16 @@ export function marketRoutes({ db, now }: AppDeps) {
     app.post(`/markets/:id/${action}`, async (c) => {
       const user = requireUser(c);
       const input = await parseBody(c, shareAmountSchema);
-      splitMerge(db, user.id, parseId(c.req.param('id')), input.quantity, action, now());
+      splitMerge(db, user.id, parseId(c.req.param('id')), input.quantity, action, now(), input.outcomeId);
       return c.json({ ok: true });
     });
   }
+  app.post('/markets/:id/convert', async (c) => {
+    const user = requireUser(c);
+    const input = await parseBody(c, convertSchema);
+    convertShares(db, user.id, parseId(c.req.param('id')), input.outcomeIds, input.quantity, now());
+    return c.json({ ok: true });
+  });
 
   app.get('/markets', (c) => {
     const q = c.req.query();

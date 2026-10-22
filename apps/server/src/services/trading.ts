@@ -2,7 +2,7 @@ import { fromCents } from '@watercooler/shared';
 import type { DB } from '../db';
 import { notFound } from '../lib/http';
 import { getMarketRow } from './markets';
-import { toOrder, type OrderRow } from './exchange';
+import { shareLabel, tokenName, toOrder, type OrderRow } from './exchange';
 
 export interface TradingQuery {
   limit: number;
@@ -12,9 +12,14 @@ export interface TradingQuery {
   clientOrderId?: string;
 }
 
-const ORDER_SELECT = `SELECT e.*, o.label FROM exchange_orders e JOIN outcomes o ON o.id = e.outcome_id`;
-type LabeledOrder = OrderRow & { label: string };
-const tradingOrder = (r: LabeledOrder) => ({ ...toOrder(r), marketId: r.market_id, outcomeLabel: r.label });
+const ORDER_SELECT = `SELECT e.*, o.label, m.neg_risk FROM exchange_orders e
+  JOIN outcomes o ON o.id = e.outcome_id JOIN markets m ON m.id = e.market_id`;
+type LabeledOrder = OrderRow & { label: string; neg_risk: 0 | 1 };
+const tradingOrder = (r: LabeledOrder) => ({
+  ...toOrder(r),
+  marketId: r.market_id,
+  outcomeLabel: shareLabel(r.label, r.token, r.neg_risk === 1),
+});
 
 export function ownedOrder(db: DB, userId: number, id: number) {
   const row = db.prepare(`${ORDER_SELECT} WHERE e.user_id = ? AND e.id = ?`).get(userId, id) as
@@ -52,12 +57,12 @@ export function tradingOrders(db: DB, userId: number, q: TradingQuery) {
 export function tradingFills(db: DB, userId: number, q: TradingQuery) {
   const rows = db
     .prepare(
-      `SELECT t.id, t.market_id, e.id AS order_id, e.outcome_id, e.side, o.label,
-    CASE WHEN t.outcome_id = e.outcome_id THEN t.price ELSE 100 - t.price END AS price,
+      `SELECT t.id, t.market_id, e.id AS order_id, e.outcome_id, e.token, e.side, o.label, m.neg_risk,
+    CASE WHEN t.outcome_id = e.outcome_id AND t.token = e.token THEN t.price ELSE 100 - t.price END AS price,
     CASE WHEN e.id = t.maker_id THEN 'maker' ELSE 'taker' END AS role,
     t.quantity, t.kind, t.created_at
     FROM exchange_trades t JOIN exchange_orders e ON e.id = t.maker_id OR e.id = t.taker_id
-    JOIN outcomes o ON o.id = e.outcome_id
+    JOIN outcomes o ON o.id = e.outcome_id JOIN markets m ON m.id = e.market_id
     WHERE e.user_id = @user AND t.id < @before ${q.marketId ? 'AND t.market_id = @market' : ''}
     ORDER BY t.id DESC LIMIT @limit`,
     )
@@ -71,8 +76,10 @@ export function tradingFills(db: DB, userId: number, q: TradingQuery) {
     market_id: number;
     order_id: number;
     outcome_id: number;
+    token: 0 | 1;
     side: 'buy' | 'sell';
     label: string;
+    neg_risk: 0 | 1;
     price: number;
     role: 'maker' | 'taker';
     quantity: number;
@@ -85,7 +92,8 @@ export function tradingFills(db: DB, userId: number, q: TradingQuery) {
       marketId: r.market_id,
       orderId: r.order_id,
       outcomeId: r.outcome_id,
-      outcomeLabel: r.label,
+      token: tokenName(r.token),
+      outcomeLabel: shareLabel(r.label, r.token, r.neg_risk === 1),
       side: r.side,
       price: fromCents(r.price),
       amount: fromCents(r.price * r.quantity),
@@ -105,6 +113,7 @@ export function marketTrades(db: DB, marketId: number, q: TradingQuery) {
     .all(marketId, q.before ?? Number.MAX_SAFE_INTEGER, q.limit + 1) as {
     id: number;
     outcome_id: number;
+    token: 0 | 1;
     price: number;
     quantity: number;
     kind: string;
@@ -115,6 +124,7 @@ export function marketTrades(db: DB, marketId: number, q: TradingQuery) {
       id: r.id,
       marketId,
       outcomeId: r.outcome_id,
+      token: tokenName(r.token),
       price: fromCents(r.price),
       quantity: r.quantity,
       kind: r.kind,
