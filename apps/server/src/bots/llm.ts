@@ -97,3 +97,44 @@ export function createChat(config: BotConfig): Chat {
       { timeout: 2 * 60_000 },
     );
 }
+
+export interface PlayRequest {
+  /** Identical for every call of a game, so it is cached once. */
+  system: string;
+  /**
+   * What everyone has seen so far, one block per event, oldest first. Calls share it as a growing
+   * prefix: the last block is marked for caching and later calls read the earlier blocks back.
+   */
+  transcript: string[];
+  /** The player's own view and task, after the shared part. */
+  prompt: string;
+  tool: Anthropic.Beta.BetaTool;
+}
+
+/** One werewolf player's turn: what it passed to `tool`, or null if it never called it. */
+export type Play = (req: PlayRequest) => Promise<unknown>;
+
+export function createPlay(config: BotConfig): Play {
+  const model = config.werewolf.model ?? config.model;
+  const { client, shared } = connect({ ...config, model });
+  return async ({ system, transcript, prompt, tool }) => {
+    const blocks: Anthropic.Beta.BetaTextBlockParam[] = transcript.map((text) => ({ type: 'text', text }));
+    if (blocks.length) blocks[blocks.length - 1]!.cache_control = { type: 'ephemeral' };
+    const response = await client.beta.messages.create(
+      {
+        model,
+        max_tokens: 8000,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: [...blocks, { type: 'text', text: prompt }] }],
+        tools: [tool],
+        ...shared,
+      },
+      { timeout: 3 * 60_000 },
+    );
+    if (response.stop_reason === 'refusal') return null;
+    const call = response.content.find(
+      (b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use' && b.name === tool.name,
+    );
+    return call?.input ?? null;
+  };
+}

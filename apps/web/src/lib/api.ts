@@ -31,7 +31,10 @@ import type {
   AdminOverview,
   AdminSiteConfig,
   AdminUser,
+  AdminWerewolfConfig,
   Feature,
+  WerewolfGame,
+  WerewolfLobby,
 } from '@watercooler/shared';
 
 export class ApiError extends Error {
@@ -116,6 +119,7 @@ export const api = {
       messagesPerHour: number;
     }) => post<AdminInstanceConfig>('/admin/config/wecom', input),
     removeWecom: () => post<AdminInstanceConfig>('/admin/config/wecom/remove'),
+    saveWerewolf: (input: AdminWerewolfConfig) => post<AdminInstanceConfig>('/admin/config/werewolf', input),
     saveSite: (input: AdminSiteConfig) => post<AdminInstanceConfig>('/admin/config/site', input),
   },
 
@@ -132,6 +136,8 @@ export const api = {
     } = {},
   ) => get<MarketSummary[]>(`/markets${qs(p)}`),
   aiZone: () => get<AiZoneSummary>('/ai'),
+  werewolf: () => get<WerewolfLobby>('/werewolf'),
+  werewolfGame: (id: number) => get<WerewolfGame>(`/werewolf/${id}`),
   market: (id: number) => get<MarketDetailResponse>(`/markets/${id}`),
   /** Mirrors show the live Polymarket book of `outcome` (default: the first option). */
   exchange: (id: number, outcome?: number) => get<ExchangeState>(`/markets/${id}/exchange${qs({ outcome })}`),

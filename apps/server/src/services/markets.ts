@@ -38,6 +38,9 @@ export interface MarketRow {
   mimic_slug: string | null;
   mimic_rank: number | null;
   mimic_volume: number;
+  /** AI werewolf bets (werewolf/game.ts): the game, and the seat for "is this player out" markets. */
+  werewolf_game_id: number | null;
+  werewolf_seat: number | null;
   ai_checked_at: number | null;
   created_at: number;
 }
@@ -195,6 +198,7 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
             },
           }
         : {}),
+      ...(r.werewolf_game_id !== null ? { werewolf: { gameId: r.werewolf_game_id, seat: r.werewolf_seat } } : {}),
     };
   });
 }
@@ -257,8 +261,11 @@ function sparklines(
 
 export type MarketFilter = 'active' | 'closed' | 'resolved' | 'all';
 export type MarketSort = 'trending' | 'pot' | 'new' | 'closing';
-/** People's markets, the AI zone, the Polymarket mirror, or all of them. */
-export type MarketZone = 'human' | 'ai' | 'mimic' | 'any';
+/**
+ * People's markets, the AI zone, the Polymarket mirror, or the AI werewolf games. `any` is all of
+ * them but the werewolf games', which are only ever listed with their game.
+ */
+export type MarketZone = 'human' | 'ai' | 'mimic' | 'werewolf' | 'any';
 
 export interface ListMarketsOptions {
   mode?: 'pool' | 'polymarket';
@@ -291,8 +298,10 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
     case 'all':
       break;
   }
-  if (opts.zone === 'human') where.push('m.is_ai = 0 AND m.mimic_id IS NULL');
+  if (opts.zone === 'human') where.push('m.is_ai = 0 AND m.mimic_id IS NULL AND m.werewolf_game_id IS NULL');
   if (opts.zone === 'ai') where.push('m.is_ai = 1');
+  if (opts.zone === 'werewolf') where.push('m.werewolf_game_id IS NOT NULL');
+  if (opts.zone === 'any') where.push('m.werewolf_game_id IS NULL');
   // Open mirrors are listed while they are in Polymarket's current top K.
   if (opts.zone === 'mimic')
     where.push(
@@ -324,6 +333,14 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
   const rows = db
     .prepare(`${LIST_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT @limit`)
     .all(params) as MarketListRow[];
+  return hydrate(db, rows, now);
+}
+
+/** A werewolf game's markets: the winning side first, then one per seat. */
+export function werewolfMarkets(db: DB, gameId: number, now: number): MarketSummary[] {
+  const rows = db
+    .prepare(`${LIST_SELECT} WHERE m.werewolf_game_id = @game ORDER BY m.werewolf_seat IS NOT NULL, m.werewolf_seat`)
+    .all({ game: gameId, since: now - DAY }) as MarketListRow[];
   return hydrate(db, rows, now);
 }
 

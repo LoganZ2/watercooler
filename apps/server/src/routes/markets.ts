@@ -105,7 +105,7 @@ export function marketRoutes({ db, config, now, polymarket: client }: AppDeps) {
       listMarkets(db, now(), {
         mode: q.mode as 'pool' | 'polymarket' | undefined,
         filter: pick<MarketFilter>(q.filter, ['active', 'closed', 'resolved', 'all'], 'active'),
-        zone: pick<MarketZone>(q.zone, ['human', 'ai', 'mimic', 'any'], 'human'),
+        zone: pick<MarketZone>(q.zone, ['human', 'ai', 'mimic', 'werewolf', 'any'], 'human'),
         sort: pick<MarketSort>(q.sort, ['trending', 'pot', 'new', 'closing'], 'trending'),
         category: q.category || undefined,
         search: q.q?.trim() || undefined,

@@ -8,6 +8,8 @@ import { getUserById } from '../src/services/users';
 import { createBindToken } from '../src/wecom/bindings';
 import { startWecom, stripMentions, type WecomService, type WecomSettings } from '../src/wecom/bot';
 import { sendNotices } from '../src/wecom/notifier';
+import { werewolfMarkets } from '../src/services/markets';
+import { createGame, finishGame } from '../src/werewolf/game';
 import {
   parseCardClick,
   type Card,
@@ -503,6 +505,35 @@ describe('WeCom bot', () => {
 
     await notices();
     expect(fake.sent.filter((m) => m.chatId === 'group2').at(-1)!.text).toContain('BOB：兑回 10');
+  });
+
+  it('stays out of the AI werewolf games: no listing, no lookups or bets, no notices', async () => {
+    const { env, fake, model, bind, notices } = wecomEnv();
+    const alice = await bind('alice', 'zhangsan');
+    const game = createGame(env.db, 6, env.clock.now + MINUTE, env.clock.now);
+    const side = werewolfMarkets(env.db, game.id, env.clock.now)[0]!;
+    await alice.post(`/markets/${side.id}/bets`, { outcomeId: side.outcomes[0]!.id, amount: 10 });
+
+    model.script(
+      callTools(
+        ['list_markets', { zone: 'all' }],
+        ['get_market', { marketId: side.id }],
+        ['place_bet', { marketId: side.id, outcome: '好人', amount: 10 }],
+        ['my_account', {}],
+      ),
+      answer('没有'),
+    );
+    await fake.message('zhangsan', '@小助手 狼人杀押好人');
+    const [list, get, bet, account] = toolResults(model.requests.at(-1)!);
+    expect(JSON.parse(list!.content)).toEqual([]);
+    expect(get).toEqual({ content: expect.stringContaining(`没有 id 为 ${side.id} 的市场`), isError: true });
+    expect(bet).toEqual({ content: expect.stringContaining(`没有 id 为 ${side.id} 的市场`), isError: true });
+    expect(JSON.parse(account!.content).activeBets).toEqual([]);
+    env.clock.now += MINUTE;
+    finishGame(env.db, game.id, 'good', env.clock.now);
+    const before = fake.sent.length;
+    await notices();
+    expect(fake.sent).toHaveLength(before);
   });
 
   it('reminds at settlement time and only warns pool markets about automatic refunds', async () => {

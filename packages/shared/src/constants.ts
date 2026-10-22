@@ -28,3 +28,10 @@ export type Token = (typeof TOKENS)[number];
 
 /** Polymarket markets with this many options or more are multi-outcome (one Yes/No book per option). */
 export const MIN_MULTI_OUTCOMES = 3;
+
+/** AI werewolf (狼人杀) table sizes the role sets are made for. */
+export const WEREWOLF_MIN_PLAYERS = 6;
+export const WEREWOLF_MAX_PLAYERS = 12;
+
+/** Betting on an AI werewolf game stops once at most half the table (rounded up) is still alive. */
+export const werewolfCutoff = (players: number) => Math.ceil(players / 2);

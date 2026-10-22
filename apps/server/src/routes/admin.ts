@@ -4,6 +4,7 @@ import {
   adminFeatureSchema,
   adminSiteConfigSchema,
   adminWecomConfigSchema,
+  adminWerewolfConfigSchema,
   adminGrantAllSchema,
   adminMimicSchema,
   adminUserSchema,
@@ -35,6 +36,7 @@ import {
   saveAiConfig,
   saveSiteConfig,
   saveWecomConfig,
+  saveWerewolfConfig,
 } from '../services/instanceConfig';
 import { getMimicTopK, setMimicTopK } from '../mimic/sync';
 
@@ -71,7 +73,7 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
     // credentials (saved ones count after the restart).
     if (
       enabled &&
-      (key === 'aiBots' || key === 'wecom') &&
+      (key === 'aiBots' || key === 'wecom' || key === 'werewolf') &&
       !runtime?.features().find((f) => f.key === key)?.configured
     ) {
       throw conflict(
@@ -83,7 +85,8 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
     const needs = FEATURE_REQUIRES[key];
     if (enabled && needs && !featureOn(getFeatureFlags(db), needs)) throw conflict('先打开「Polymarket 模式」');
     setFeatureFlag(db, admin.id, key, enabled, now());
-    // Bots and the WeCom bot start or stop right away; Polymarket is checked on every new market.
+    // Bots, the WeCom bot and the werewolf games start or stop right away; Polymarket is checked
+    // on every new market.
     await runtime?.apply();
     return c.json(overview());
   });
@@ -133,6 +136,20 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
     const admin = requireAdmin(c);
     removeWecomConfig(config.botConfigPath);
     audit(db, admin.id, 'config', '移除企业微信配置', now());
+    return c.json<AdminInstanceConfig>(configView());
+  });
+
+  app.post('/admin/config/werewolf', async (c) => {
+    const admin = requireAdmin(c);
+    const input = await parseBody(c, adminWerewolfConfigSchema);
+    saveWerewolfConfig(config.botConfigPath, input);
+    audit(
+      db,
+      admin.id,
+      'config',
+      `更新 AI 狼人杀配置（${input.players} 人，每局休息 ${input.restMinutes} 分钟${input.model ? `，模型 ${input.model}` : ''}）`,
+      now(),
+    );
     return c.json<AdminInstanceConfig>(configView());
   });
 

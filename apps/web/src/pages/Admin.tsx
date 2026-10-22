@@ -1,6 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CURRENCY_NAME,
+  WEREWOLF_MAX_PLAYERS,
+  WEREWOLF_MIN_PLAYERS,
   type AdminInstanceConfig,
   type AdminOverview,
   type Feature,
@@ -38,6 +40,10 @@ const FEATURE_TEXT: Record<Feature, { title: string; hint: string }> = {
   polymarket: {
     title: 'Polymarket 模式',
     hint: '允许新建订单簿（Yes / No 份额）市场。关闭后已有的这类市场照常交易和结算。',
+  },
+  werewolf: {
+    title: 'AI 狼人杀',
+    hint: '一桌 AI 玩家自己打狼人杀，一局接一局、每局之间休息一会儿，发言实时直播，大家押哪边赢或某个玩家会不会出局（奖池模式）。需要「配置」里的 AI 模型，人数也在那里改。每局要调用几十次模型，注意费用。',
   },
   mimic: {
     title: 'Polymarket 镜像盘',
@@ -299,7 +305,8 @@ function FeaturesTab({ features, topK }: { features: FeatureState[]; topK: numbe
         </div>
       ))}
       <p className="p-5 text-xs leading-relaxed text-faint">
-        开关立即生效，不用重启。AI 机器人和企业微信机器人要用到「配置」里的凭证，凭证改过后要重启实例才生效。
+        开关立即生效，不用重启。AI 机器人、企业微信机器人和 AI
+        狼人杀要用到「配置」里的凭证，凭证改过后要重启实例才生效。
       </p>
     </Card>
   );
@@ -643,6 +650,9 @@ function ConfigTab() {
         <AiConfigForm key={`ai:${JSON.stringify(data.ai)}`} ai={data.ai} />
         <WecomConfigForm key={`wecom:${JSON.stringify(data.wecom)}`} wecom={data.wecom} hasAi={data.ai !== null} />
       </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <WerewolfConfigForm key={`werewolf:${JSON.stringify(data.werewolf)}`} werewolf={data.werewolf} />
+      </div>
       <SiteConfigForm key={`site:${JSON.stringify(data.site)}`} site={data.site} />
     </div>
   );
@@ -790,6 +800,54 @@ function WecomConfigForm({ wecom, hasAi }: { wecom: AdminInstanceConfig['wecom']
               </Button>
             )}
           </div>
+        </form>
+      )}
+    </Card>
+  );
+}
+
+function WerewolfConfigForm({ werewolf }: { werewolf: AdminInstanceConfig['werewolf'] }) {
+  const [players, setPlayers] = useState(String(werewolf?.players ?? 9));
+  const [rest, setRest] = useState(String(werewolf?.restMinutes ?? 10));
+  const [model, setModel] = useState(werewolf?.model ?? '');
+  const save = useSaveConfig(api.admin.saveWerewolf);
+
+  return (
+    <Card className="p-6">
+      <h2 className="font-semibold">AI 狼人杀</h2>
+      <p className="mt-1 text-xs text-faint">
+        {`${WEREWOLF_MIN_PLAYERS} 到 ${WEREWOLF_MAX_PLAYERS} 人，三分之一是狼人，配预言家、女巫，8 人起加猎人。场上剩一半人时停止下注。新设置从重启后的下一局开始。`}
+      </p>
+      {!werewolf ? (
+        <p className="mt-4 text-sm text-dim">先保存 AI 模型配置：狼人杀的玩家用的是同一个 API key。</p>
+      ) : (
+        <form
+          className="mt-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate({ players: numberField(players), restMinutes: numberField(rest), model: model.trim() });
+          }}
+        >
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="玩家人数">
+              <Input
+                type="number"
+                min={WEREWOLF_MIN_PLAYERS}
+                max={WEREWOLF_MAX_PLAYERS}
+                value={players}
+                onChange={(e) => setPlayers(e.target.value)}
+              />
+            </Field>
+            <Field label="每局之间休息（分钟）">
+              <Input type="number" min={1} max={120} value={rest} onChange={(e) => setRest(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="玩家用的模型" hint="留空和 AI 模型配置一样；可以换成更便宜的模型省钱">
+            <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="和 AI 模型一样" />
+          </Field>
+          <Button type="submit" loading={save.isPending}>
+            保存
+          </Button>
         </form>
       )}
     </Card>

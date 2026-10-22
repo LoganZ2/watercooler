@@ -128,6 +128,7 @@ export async function sendNotices(deps: NotifierDeps): Promise<void> {
   const settled = db
     .prepare(
       `SELECT * FROM markets m WHERE m.status IN ('resolved', 'cancelled') AND m.resolved_at > ?
+          AND m.werewolf_game_id IS NULL -- AI werewolf games stay off WeCom
           AND NOT EXISTS (SELECT 1 FROM wecom_notices n WHERE n.kind = 'settled' AND n.market_id = m.id)
         ORDER BY m.resolved_at`,
     )

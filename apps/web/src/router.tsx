@@ -14,6 +14,7 @@ import Market from './pages/Market';
 import NotFound from './pages/NotFound';
 import PortfolioPage from './pages/Portfolio';
 import Profile from './pages/Profile';
+import WerewolfPage from './pages/Werewolf';
 import SettingsPage from './pages/Settings';
 
 export const router = createBrowserRouter(
@@ -26,6 +27,8 @@ export const router = createBrowserRouter(
         { path: '/market/:id', element: <Market /> },
         { path: '/ai', element: <AiZone /> },
         { path: '/polymarket', element: <PolymarketMirror /> },
+        { path: '/werewolf', element: <WerewolfPage /> },
+        { path: '/werewolf/:id', element: <WerewolfPage /> },
         { path: '/leaderboard', element: <Leaderboard /> },
         { path: '/u/:id', element: <Profile /> },
         { path: '/login', element: <Login /> },

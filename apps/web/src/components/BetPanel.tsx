@@ -35,11 +35,14 @@ export function BetPanel({
   stakes,
   outcomeId,
   onOutcomeChange,
+  heading,
 }: {
   market: MarketDetail;
   stakes: Stake[];
   outcomeId: number;
   onOutcomeChange: (id: number) => void;
+  /** What the ticket is for, when the page shows several markets; plain 「下注」 otherwise. */
+  heading?: React.ReactNode;
 }) {
   const { me } = useMe();
   const setMe = useSetMe();
@@ -77,6 +80,7 @@ export function BetPanel({
         'markets',
         'stats',
         'leaderboard',
+        'werewolf',
       ]) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
@@ -89,7 +93,7 @@ export function BetPanel({
     },
   });
 
-  if (market.status !== 'open') return <ClosedPanel market={market} />;
+  if (market.status !== 'open') return <ClosedPanel market={market} heading={heading} />;
 
   const balance = me?.balance ?? 0;
   const insufficient = amountNum > balance;
@@ -100,7 +104,7 @@ export function BetPanel({
 
   return (
     <Card className="p-5">
-      <h2 className="font-semibold">下注</h2>
+      <h2 className="font-semibold">{heading ?? '下注'}</h2>
       <div
         className={clsx(
           'mt-4 grid gap-2',
@@ -234,12 +238,13 @@ export function BetPanel({
 }
 
 /** Shown instead of the bet form once betting has stopped. */
-function ClosedPanel({ market }: { market: MarketDetail }) {
+function ClosedPanel({ market, heading }: { market: MarketDetail; heading?: React.ReactNode }) {
   const winner = market.outcomes.find((o) => o.id === market.resolvedOutcomeId);
   if (market.status === 'resolved' && winner) {
     const c = outcomeColor(winner.index, market.isBinary);
     return (
       <Card className="p-6 text-center">
+        {heading && <h2 className="mb-4 text-left font-semibold">{heading}</h2>}
         <Crown className="mx-auto size-8 text-gold" />
         <div className="mt-3 text-sm text-dim">最终结果</div>
         <div className="mt-1 text-3xl font-bold" style={{ color: c }}>
@@ -254,18 +259,21 @@ function ClosedPanel({ market }: { market: MarketDetail }) {
     );
   }
   return (
-    <Card className="flex items-start gap-3 p-5 text-sm text-dim">
+    <Card className="flex flex-wrap items-start gap-3 p-5 text-sm text-dim">
+      {heading && <h2 className="w-full font-semibold text-fg">{heading}</h2>}
       {market.status === 'closed' ? (
         <Hourglass className="mt-0.5 size-5 shrink-0 text-gold" />
       ) : (
         <Ban className="mt-0.5 size-5 shrink-0 text-faint" />
       )}
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="font-medium text-fg">{market.status === 'closed' ? '下注已截止' : '市场已取消'}</div>
         <div className="mt-1 text-xs leading-relaxed text-faint">
-          {market.status === 'closed'
-            ? `等待 ${market.creator.displayName} 公布结果；${formatDate(market.resolveBy!)} 前没公布会自动取消、全额退款。`
-            : `所有下注已全额退回${CURRENCY_NAME}余额。`}
+          {market.status !== 'closed'
+            ? `所有下注已全额退回${CURRENCY_NAME}余额。`
+            : market.werewolf
+              ? '场上人数到了停止下注的线，这局狼人杀一结束就自动结算。'
+              : `等待 ${market.creator.displayName} 公布结果；${formatDate(market.resolveBy!)} 前没公布会自动取消、全额退款。`}
         </div>
       </div>
     </Card>

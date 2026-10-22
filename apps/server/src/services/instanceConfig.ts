@@ -11,7 +11,12 @@ import {
 import { dirname, resolve } from 'node:path';
 import type { AdminInstanceConfig, AdminSiteConfig } from '@watercooler/shared';
 import type { z } from 'zod';
-import type { adminAiConfigSchema, adminSiteConfigSchema, adminWecomConfigSchema } from '@watercooler/shared';
+import type {
+  adminAiConfigSchema,
+  adminSiteConfigSchema,
+  adminWecomConfigSchema,
+  adminWerewolfConfigSchema,
+} from '@watercooler/shared';
 import { botConfigSchema } from '../bots/config';
 import type { Config } from '../config';
 import { badRequest, conflict } from '../lib/http';
@@ -56,7 +61,7 @@ function writeAtomic(path: string, content: string): void {
   renameSync(tmp, target);
 }
 
-type BotObject = Record<string, unknown> & { wecom?: Record<string, unknown> };
+type BotObject = Record<string, unknown> & { wecom?: Record<string, unknown>; werewolf?: Record<string, unknown> };
 
 function readBotObject(path: string): BotObject | null {
   const text = readText(path);
@@ -110,6 +115,7 @@ export function describeInstanceConfig(config: Config, restartNeeded: boolean): 
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback);
   const wecom = raw?.wecom;
+  const werewolf = raw?.werewolf;
 
   const env = parseEnv(readText(config.envFilePath));
   const envNum = (key: string, current: number) => {
@@ -136,6 +142,13 @@ export function describeInstanceConfig(config: Config, restartNeeded: boolean): 
           siteUrl: str(wecom.siteUrl),
           siteName: bot?.wecom?.siteName ?? (str(wecom.siteName) || 'Watercooler'),
           messagesPerHour: bot?.wecom?.messagesPerHour ?? num(wecom.messagesPerHour, 30),
+        }
+      : null,
+    werewolf: raw
+      ? {
+          players: bot?.werewolf.players ?? num(werewolf?.players, 9),
+          restMinutes: bot?.werewolf.restMinutes ?? num(werewolf?.restMinutes, 10),
+          model: bot?.werewolf.model ?? str(werewolf?.model),
         }
       : null,
     // What .env says (applied at the next start), or what is running when .env does not say.
@@ -193,6 +206,22 @@ export function saveWecomConfig(path: string, input: z.output<typeof adminWecomC
   validateBot(next);
   writeBot(path, next);
   return Boolean(input.secret);
+}
+
+/** Save the werewolf settings; an empty model means the AI model's. */
+export function saveWerewolfConfig(path: string, input: z.output<typeof adminWerewolfConfigSchema>): void {
+  const current = readBotObject(path);
+  if (!current) throw conflict('先保存 AI 模型配置：狼人杀的玩家用它的 API key');
+  const next: BotObject = {
+    ...current,
+    werewolf: {
+      players: input.players,
+      restMinutes: input.restMinutes,
+      ...(input.model ? { model: input.model } : {}),
+    },
+  };
+  validateBot(next);
+  writeBot(path, next);
 }
 
 export function removeWecomConfig(path: string): void {

@@ -20,6 +20,7 @@ const BOT: BotConfig = {
   marketsPerDay: 4,
   betsPerDay: 50,
   flipProbability: 0,
+  werewolf: { players: 9, restMinutes: 10 },
 };
 
 /** A fake model: answers each submit tool from `answers`, and records what it was asked. */

@@ -1,10 +1,9 @@
-import { randomBytes } from 'node:crypto';
 import type { Category } from '@watercooler/shared';
 import type { DB } from '../db';
 import { HOUR, MINUTE } from '../lib/time';
 import { audit } from '../services/admin';
 import { getOutcomeRows, recordPriceSnapshot, type MarketRow, type OutcomeRow } from '../services/markets';
-import { adjustBalance } from '../services/users';
+import { adjustBalance, systemUser } from '../services/users';
 import type { PolymarketClient, PolymarketEvent, PolymarketMarket } from './client';
 
 /**
@@ -45,24 +44,7 @@ export function setMimicTopK(db: DB, adminId: number, topK: number, now: number)
 
 /** The account mirror markets are "created by": a bot that never logs in, trades or ranks. */
 export function mirrorCreatorId(db: DB, now: number): number {
-  const saved = db.prepare(`SELECT value FROM settings WHERE key = 'mimic.creator'`).get() as
-    { value: string } | undefined;
-  if (saved && db.prepare('SELECT 1 FROM users WHERE id = ?').get(Number(saved.value))) return Number(saved.value);
-  let username = 'polymarket';
-  while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username))
-    username = `polymarket-${randomBytes(3).toString('hex')}`;
-  const id = Number(
-    db
-      .prepare(
-        `INSERT INTO users (username, display_name, password_hash, is_bot, created_at) VALUES (?, 'Polymarket', ?, 1, ?)`,
-      )
-      .run(username, `!${randomBytes(24).toString('hex')}`, now).lastInsertRowid,
-  );
-  db.prepare(
-    `INSERT INTO settings (key, value, updated_at) VALUES ('mimic.creator', ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-  ).run(String(id), now);
-  return id;
+  return systemUser(db, 'mimic.creator', 'polymarket', 'Polymarket', now);
 }
 
 const CATEGORY_TAGS: [Category, string[]][] = [

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { fromCents, type LedgerKind, type Me, type PublicUser, type UserRef } from '@watercooler/shared';
 import type { Config } from '../config';
 import type { DB } from '../db';
@@ -115,3 +116,28 @@ export function claimDailyBonus(db: DB, config: Config, userId: number, now: num
     return adjustBalance(db, userId, Math.round(config.dailyBonus * 100), 'bonus', now, { note: '每日签到' });
   })();
 }
+
+/**
+ * A bot account the site itself runs (the Polymarket mirror's creator, the werewolf judge): made
+ * once, remembered under `settingKey`, unable to log in, and never an AI bot (those are ai_bot_*).
+ */
+export function systemUser(db: DB, settingKey: string, username: string, displayName: string, now: number): number {
+  const saved = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey) as { value: string } | undefined;
+  if (saved && db.prepare('SELECT 1 FROM users WHERE id = ?').get(Number(saved.value))) return Number(saved.value);
+  let name = username;
+  while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(name))
+    name = `${username}-${randomBytes(3).toString('hex')}`;
+  const id = Number(
+    db
+      .prepare('INSERT INTO users (username, display_name, password_hash, is_bot, created_at) VALUES (?, ?, ?, 1, ?)')
+      .run(name, displayName, `!${randomBytes(24).toString('hex')}`, now).lastInsertRowid,
+  );
+  db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(settingKey, String(id), now);
+  return id;
+}
+
+/** The settings keys of the site's own bot accounts, which never rank. */
+export const SYSTEM_USER_KEYS = ['mimic.creator', 'werewolf.host'] as const;

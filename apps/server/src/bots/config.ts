@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { WEREWOLF_MAX_PLAYERS, WEREWOLF_MIN_PLAYERS } from '@watercooler/shared';
 import { z } from 'zod';
 
 /** bot.json: how the AI bots reach the model and how busy they are. Lives next to the database, never in git. */
@@ -33,6 +34,17 @@ export const botConfigSchema = z.object({
       messagesPerHour: z.number().int().min(1).max(1000).default(30),
     })
     .optional(),
+  /** AI werewolf (狼人杀) games, played while the `werewolf` flag is on. */
+  werewolf: z
+    .object({
+      /** Seats at the table; the role set follows from it. */
+      players: z.number().int().min(WEREWOLF_MIN_PLAYERS).max(WEREWOLF_MAX_PLAYERS).default(9),
+      /** Break between games, during which the next game's bets are already open. */
+      restMinutes: z.number().int().min(1).max(120).default(10),
+      /** Model for the players; the model above when absent. */
+      model: z.string().min(1).optional(),
+    })
+    .prefault({}),
 });
 export type BotConfig = z.infer<typeof botConfigSchema>;
 

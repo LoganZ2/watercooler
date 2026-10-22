@@ -16,6 +16,7 @@ const FEATURE_LABEL: Record<Feature, string> = {
   wecom: '企业微信机器人',
   polymarket: 'Polymarket 模式',
   mimic: 'Polymarket 镜像盘',
+  werewolf: 'AI 狼人杀',
 };
 
 /** Features that also need credentials from bot.json. */
@@ -23,11 +24,17 @@ export type CredentialFeature = 'aiBots' | 'wecom';
 
 /**
  * The flags alone decide what should run; credentials never switch a feature on or off. With no
- * stored flag, Polymarket and its mirror are on and the credential features are off (see
- * seedFeatureFlags).
+ * stored flag, Polymarket and its mirror are on and the features that need bot.json are off (see
+ * seedFeatureFlags for the bots and WeCom).
  */
 export function getFeatureFlags(db: DB): Record<Feature, boolean> {
-  const flags: Record<Feature, boolean> = { aiBots: false, wecom: false, polymarket: true, mimic: true };
+  const flags: Record<Feature, boolean> = {
+    aiBots: false,
+    wecom: false,
+    polymarket: true,
+    mimic: true,
+    werewolf: false,
+  };
   const rows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'feature.%'`).all() as {
     key: string;
     value: string;

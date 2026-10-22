@@ -64,7 +64,8 @@ export function listBets(
 ): Bet[] {
   const where: string[] = [];
   const params: unknown[] = [];
-  if (opts.zone) where.push(opts.zone === 'ai' ? 'm.is_ai = 1' : 'm.is_ai = 0');
+  // The AI werewolf games keep their bets to themselves.
+  if (opts.zone) where.push(opts.zone === 'ai' ? 'm.is_ai = 1' : 'm.is_ai = 0 AND m.werewolf_game_id IS NULL');
   if (opts.marketId !== undefined) {
     where.push('b.market_id = ?');
     params.push(opts.marketId);

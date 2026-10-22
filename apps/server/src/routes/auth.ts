@@ -16,6 +16,7 @@ import { MINUTE } from '../lib/time';
 import { featureOn, getFeatureFlags } from '../services/admin';
 import { aiMarketsExist } from '../services/markets';
 import { claimDailyBonus, createUser, getUserById, getUserByUsername, toMe } from '../services/users';
+import { gamesExist } from '../werewolf/game';
 
 export function authRoutes({ db, config, now, runtime }: AppDeps) {
   const app = new Hono<AppEnv>();
@@ -23,18 +24,20 @@ export function authRoutes({ db, config, now, runtime }: AppDeps) {
   const registrations = new RateLimiter(20, 60 * MINUTE);
   const cookiePath = config.basePath || '/';
 
-  app.get('/config', (c) =>
-    c.json<AppConfig>({
+  app.get('/config', (c) => {
+    const flags = getFeatureFlags(db);
+    return c.json<AppConfig>({
       inviteRequired: config.inviteCode !== null,
       startingBalance: config.startingBalance,
       dailyBonus: config.dailyBonus,
       privateMode: config.privateMode,
-      aiZone: Boolean(runtime?.botsRunning()) || aiMarketsExist(db),
+      aiZone: Boolean(runtime?.botsRunning()) || aiMarketsExist(db) || flags.werewolf || gamesExist(db),
       wecom: runtime?.wecom() !== undefined,
-      polymarket: getFeatureFlags(db).polymarket,
-      mimic: featureOn(getFeatureFlags(db), 'mimic'),
-    }),
-  );
+      polymarket: flags.polymarket,
+      mimic: featureOn(flags, 'mimic'),
+      werewolf: flags.werewolf,
+    });
+  });
 
   app.get('/auth/me', (c) => {
     const user = c.get('user');

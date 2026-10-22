@@ -34,6 +34,8 @@ export interface AppConfig {
   mimic: boolean;
   /** Whether new markets may use the Polymarket (order book) mode. */
   polymarket: boolean;
+  /** Whether the AI werewolf (狼人杀) games are running. */
+  werewolf: boolean;
 }
 
 /** `closed` is derived: betting time is over but the creator has not announced the result yet. */
@@ -81,6 +83,8 @@ export interface MarketSummary {
    * site at those prices, so trades here never move them. Results follow Polymarket's.
    */
   mimic?: MimicInfo;
+  /** A bet on an AI werewolf game: which side wins (seat null) or whether that seat is voted or killed out. */
+  werewolf?: { gameId: number; seat: number | null };
 }
 
 /** A filled Polymarket mirror order. */
@@ -369,7 +373,7 @@ export interface WecomBindRequest {
 }
 
 /** Instance features an admin can switch on and off while the site runs. */
-export const FEATURES = ['aiBots', 'wecom', 'polymarket', 'mimic'] as const;
+export const FEATURES = ['aiBots', 'wecom', 'polymarket', 'mimic', 'werewolf'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export interface FeatureState {
@@ -455,8 +459,90 @@ export interface AdminInstanceConfig {
     siteName: string;
     messagesPerHour: number;
   } | null;
+  /** The AI werewolf games' settings (defaults while bot.json has none); null while there is no bot.json. */
+  werewolf: AdminWerewolfConfig | null;
   site: AdminSiteConfig;
   /** Why the saved bot.json cannot be used, if it cannot. */
   botError: string | null;
   restartNeeded: boolean;
+}
+
+export interface AdminWerewolfConfig {
+  players: number;
+  restMinutes: number;
+  /** Model for the players; empty means the AI model above. */
+  model: string;
+}
+
+export type WerewolfRole = 'wolf' | 'seer' | 'witch' | 'hunter' | 'villager';
+export type WerewolfSide = 'good' | 'wolves';
+/** waiting: seats dealt and betting open until it starts; aborted: could not be finished, bets refunded. */
+export type WerewolfStatus = 'waiting' | 'running' | 'ended' | 'aborted';
+
+export interface WerewolfSeat {
+  seat: number;
+  name: string;
+  /** Playing style, public from the start. */
+  persona: string;
+  alive: boolean;
+  /** Day of death (night deaths count for the morning they are announced). */
+  diedDay: number | null;
+  /** How the seat died, once announced: 'night' covers both the wolves' kill and the witch's poison. */
+  death: 'night' | 'exile' | 'shot' | null;
+  /** Hidden until the game is over, except a hunter who has fired. */
+  role: WerewolfRole | null;
+  /** The pool market on whether this seat is out by the end of the game. */
+  marketId: number;
+}
+
+export interface WerewolfEvent {
+  id: number;
+  day: number;
+  kind: string;
+  seat: number | null;
+  target: number | null;
+  /** What everyone saw or heard, rendered in Chinese. */
+  text: string;
+  /** The player's private reasoning; only shown once the game is over. */
+  thought: string | null;
+  /** Night actions and wolf talk are hidden while the game runs. */
+  public: boolean;
+  createdAt: number;
+}
+
+export interface WerewolfGameSummary {
+  id: number;
+  status: WerewolfStatus;
+  players: number;
+  /** Betting stops once at most this many players are alive. */
+  cutoff: number;
+  alive: number;
+  day: number;
+  /** e.g. 「第 2 天 · 白天发言」. */
+  phase: string;
+  startsAt: number;
+  startedAt: number | null;
+  endedAt: number | null;
+  winner: WerewolfSide | null;
+  bettingOpen: boolean;
+  /** Everything staked on this game's markets. */
+  pot: number;
+}
+
+export interface WerewolfGame extends WerewolfGameSummary {
+  /** The board, e.g. 3 wolves, seer, witch, hunter, 3 villagers. */
+  roles: { role: WerewolfRole; count: number }[];
+  seats: WerewolfSeat[];
+  events: WerewolfEvent[];
+  /** Pool market on the winning side: outcomes 好人 / 狼人. */
+  sideMarket: MarketSummary;
+  /** Pool markets per seat: outcomes 出局 / 存活, in seat order. */
+  seatMarkets: MarketSummary[];
+}
+
+export interface WerewolfLobby {
+  enabled: boolean;
+  /** The game being played or about to start. */
+  current: WerewolfGameSummary | null;
+  recent: WerewolfGameSummary[];
 }

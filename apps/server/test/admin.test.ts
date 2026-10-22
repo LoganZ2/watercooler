@@ -27,6 +27,8 @@ async function runtimeEnv(envText?: string) {
   const files = { dir, bot: join(dir, 'bot.json'), env: join(dir, '.env') };
   if (envText !== undefined) writeFileSync(files.env, envText);
   const running = { bots: 0, wecom: 0 };
+  /** The werewolf service: whether it runs, and with how many seats. */
+  const werewolf = { running: 0, players: 0 };
   let current: Runtime | undefined;
   const proxy: AppRuntime = {
     botsRunning: () => current?.botsRunning() ?? false,
@@ -56,10 +58,15 @@ async function runtimeEnv(envText?: string) {
         running.wecom++;
         return { announceBinding: () => {}, connected: () => true, stop: () => running.wecom-- } as WecomService;
       },
+      startWerewolf: (bot) => {
+        werewolf.running++;
+        werewolf.players = bot.werewolf.players;
+        return { stop: () => werewolf.running--, status: () => ({ game: null, problem: null }) };
+      },
     });
     await current.apply();
   };
-  return { env, admin, alice, files, running, restart };
+  return { env, admin, alice, files, running, werewolf, restart };
 }
 
 describe('admin console', () => {
@@ -233,6 +240,44 @@ describe('admin console', () => {
         problem: '缺少配置：服务器上没有 bot.json',
       });
       expect((await enable('aiBots', false)).status).toBe(200);
+    } finally {
+      env.db.close();
+      rmSync(files.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('plays werewolf only while its flag is on, never switched on by credentials alone', async () => {
+    const { env, admin, alice, files, werewolf, restart } = await runtimeEnv();
+    try {
+      const enable = (enabled = true) => admin.post('/admin/features', { key: 'werewolf', enabled });
+      await restart();
+      expect((await enable()).status).toBe(409);
+      expect((await admin.post('/admin/config/werewolf', { players: 7, restMinutes: 5, model: '' })).status).toBe(409);
+
+      writeFileSync(files.bot, JSON.stringify({ apiKey: 'k', model: 'm' }));
+      const saved = await admin.post('/admin/config/werewolf', { players: 7, restMinutes: 5, model: 'cheap' });
+      expect(saved.body.werewolf).toEqual({ players: 7, restMinutes: 5, model: 'cheap' });
+      expect(JSON.parse(readFileSync(files.bot, 'utf8')).werewolf).toEqual({
+        players: 7,
+        restMinutes: 5,
+        model: 'cheap',
+      });
+      expect((await admin.post('/admin/config/werewolf', { players: 13, restMinutes: 5, model: '' })).status).toBe(400);
+
+      await restart();
+      expect(werewolf.running).toBe(0);
+      expect((await alice.get('/config')).body).toMatchObject({ werewolf: false });
+      expect((await enable()).status).toBe(200);
+      expect(werewolf).toEqual({ running: 1, players: 7 });
+      expect((await alice.get('/config')).body).toMatchObject({ werewolf: true, aiZone: true });
+      await restart();
+      expect(werewolf.running).toBe(1);
+      await enable(false);
+      expect(werewolf.running).toBe(0);
+      expect((await admin.get('/admin/audit')).body.map((a: { detail: string }) => a.detail).slice(0, 2)).toEqual([
+        '关闭「AI 狼人杀」',
+        '开启「AI 狼人杀」',
+      ]);
     } finally {
       env.db.close();
       rmSync(files.dir, { recursive: true, force: true });

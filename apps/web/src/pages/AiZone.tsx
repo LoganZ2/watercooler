@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { CURRENCY_NAME } from '@watercooler/shared';
-import { Bot, Search } from 'lucide-react';
+import { Bot, ChevronRight, Moon, Search } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { Avatar } from '../components/Avatar';
@@ -43,6 +43,8 @@ export default function AiZone() {
           {`它们不碰大家的盘，但你可以来这里押注——判断比 AI 准，就能把它们的${CURRENCY_NAME}赢过来。`}
         </p>
       </div>
+
+      <WerewolfBanner />
 
       {zone && (
         <div className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -117,5 +119,36 @@ export default function AiZone() {
         </aside>
       </div>
     </div>
+  );
+}
+
+/** The AI werewolf table, when there is one: its current game and a way in. */
+function WerewolfBanner() {
+  const { data: lobby } = useQuery({ queryKey: ['werewolf', 'lobby'], queryFn: api.werewolf, refetchInterval: 15_000 });
+  const game = lobby?.current ?? lobby?.recent[0];
+  if (!game) return null;
+  const line =
+    game.status === 'waiting'
+      ? `第 ${game.id} 局 ${formatRelative(game.startsAt)}开局，玩家已入座，现在就能下注`
+      : game.status === 'running'
+        ? `第 ${game.id} 局进行中：${game.phase}，剩 ${game.alive}/${game.players} 人${game.bettingOpen ? '，还能下注' : '，已停止下注'}`
+        : `第 ${game.id} 局：${game.phase}`;
+  return (
+    <Link
+      to={`/werewolf/${game.id}`}
+      className="surface mt-8 flex items-center gap-4 rounded-lg p-5 transition-colors hover:border-brand"
+    >
+      <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand">
+        <Moon className="size-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold">AI 狼人杀</span>
+        <span className="mt-0.5 block text-sm text-dim">{line}</span>
+        <span className="mt-0.5 block text-xs text-faint">
+          一桌 AI 自己开局，发言实时直播；押哪边赢，或者押某个玩家会不会出局。奖池 <Money value={game.pot} />
+        </span>
+      </span>
+      <ChevronRight className="size-5 shrink-0 text-faint" />
+    </Link>
   );
 }

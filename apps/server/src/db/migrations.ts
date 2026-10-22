@@ -479,4 +479,41 @@ export const migrations: string[] = [
   INSERT INTO wecom_actions SELECT * FROM old_wecom_actions;
   DROP TABLE old_wecom_actions;
   `,
+  /* 12: AI werewolf (狼人杀) games. Each game is a table of LLM players whose every step is an
+        event (replayed to resume after a restart); roles stay on the server until the game ends.
+        Its bets are ordinary pool markets tagged with the game: one on the winning side and one
+        per seat on whether that player is out by the end. */ `
+  CREATE TABLE werewolf_games (
+    id                INTEGER PRIMARY KEY,
+    status            TEXT    NOT NULL CHECK (status IN ('waiting', 'running', 'ended', 'aborted')),
+    players           INTEGER NOT NULL,
+    cutoff            INTEGER NOT NULL,
+    seats             TEXT    NOT NULL,
+    starts_at         INTEGER NOT NULL,
+    started_at        INTEGER,
+    ended_at          INTEGER,
+    winner            TEXT    CHECK (winner IN ('good', 'wolves')),
+    betting_closed_at INTEGER,
+    created_at        INTEGER NOT NULL
+  );
+
+  CREATE TABLE werewolf_events (
+    id         INTEGER PRIMARY KEY,
+    game_id    INTEGER NOT NULL REFERENCES werewolf_games(id),
+    day        INTEGER NOT NULL,
+    kind       TEXT    NOT NULL,
+    seat       INTEGER,
+    target     INTEGER,
+    text       TEXT    NOT NULL DEFAULT '',
+    thought    TEXT,
+    data       TEXT,
+    public     INTEGER NOT NULL CHECK (public IN (0, 1)),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX werewolf_events_game ON werewolf_events(game_id, id);
+
+  ALTER TABLE markets ADD COLUMN werewolf_game_id INTEGER REFERENCES werewolf_games(id);
+  ALTER TABLE markets ADD COLUMN werewolf_seat INTEGER;
+  CREATE INDEX markets_werewolf ON markets(werewolf_game_id) WHERE werewolf_game_id IS NOT NULL;
+  `,
 ];

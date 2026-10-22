@@ -2,13 +2,14 @@ import { spawn } from 'node:child_process';
 import type { FeatureState } from '@watercooler/shared';
 import { ensureBots } from './bots/agent';
 import { loadBotConfig, type BotConfig } from './bots/config';
-import { createAsk, createChat } from './bots/llm';
+import { createAsk, createChat, createPlay } from './bots/llm';
 import { startBots } from './bots/scheduler';
 import type { Config } from './config';
 import type { DB } from './db';
 import { createPolymarketClient, type PolymarketClient } from './mimic/client';
 import { startMimic, type MimicService } from './mimic/sync';
 import { featureOn, getFeatureFlags, seedFeatureFlags } from './services/admin';
+import { startWerewolf, type WerewolfService } from './werewolf/service';
 import { startWecom, type WecomService } from './wecom/bot';
 import { connectWecom } from './wecom/transport';
 
@@ -32,9 +33,10 @@ export interface RuntimeDeps {
   config: Config;
   now: () => number;
   log?: (m: string) => void;
-  /** Overridable in tests; both default to the real bots and WeCom connection. */
+  /** Overridable in tests; they default to the real bots, WeCom connection and werewolf games. */
   startBots?: (bot: BotConfig) => Promise<() => void>;
   startWecom?: (bot: BotConfig) => WecomService;
+  startWerewolf?: (bot: BotConfig) => WerewolfService;
   /** Polymarket's public APIs, for the mirror; tests pass a fake. */
   polymarket?: PolymarketClient;
 }
@@ -76,6 +78,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       });
     });
 
+  const launchWerewolf =
+    deps.startWerewolf ??
+    ((bot: BotConfig) => {
+      log(`🐺 werewolf games running on ${bot.werewolf.model ?? bot.model}, ${bot.werewolf.players} players`);
+      return startWerewolf({
+        db,
+        play: createPlay(bot),
+        now,
+        log,
+        players: bot.werewolf.players,
+        restMs: bot.werewolf.restMinutes * 60_000,
+      });
+    });
+
   // bot.json is read once, at the first apply(): changed credentials take effect after a restart,
   // like every other setting, while flags switch the services on and off right away.
   let loaded = false;
@@ -88,6 +104,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   // The mirror always runs: with the flag off it still settles positions people hold.
   let mimic: MimicService | null = null;
   let mimicWasOn = false;
+  let werewolf: WerewolfService | null = null;
 
   async function sync(): Promise<void> {
     if (!loaded) {
@@ -129,6 +146,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (mimicOn && !mimicWasOn) void mimic.syncNow();
     mimicWasOn = mimicOn;
 
+    if (werewolf && !flags.werewolf) {
+      werewolf.stop();
+      werewolf = null;
+      log('🐺 werewolf games paused');
+    }
+    if (flags.werewolf && bot && !werewolf) werewolf = launchWerewolf(bot);
+
     if (wecom && !flags.wecom) {
       wecom.stop();
       wecom = null;
@@ -144,6 +168,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
   }
+
+  const clock = (t: number) =>
+    new Intl.DateTimeFormat('zh-CN', {
+      timeZone: config.timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(t);
 
   // One sync at a time: two quick toggles must not start a service twice.
   let queue: Promise<void> = Promise.resolve();
@@ -198,8 +230,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             status: !on
               ? null
               : s?.lastSync
-                ? `${new Intl.DateTimeFormat('zh-CN', { timeZone: config.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(s.lastSync)} 同步过，正在镜像 ${s.listed} 个盘`
+                ? `${clock(s.lastSync)} 同步过，正在镜像 ${s.listed} 个盘`
                 : '等待第一次同步',
+          };
+        })(),
+        (() => {
+          const s = werewolf?.status();
+          const g = s?.game;
+          return {
+            key: 'werewolf' as const,
+            enabled: flags.werewolf,
+            configured: bot !== null,
+            active: werewolf !== null && !s?.problem,
+            problem: !flags.werewolf ? null : !bot ? noConfig : (s?.problem ?? null),
+            status: !g
+              ? null
+              : g.status === 'waiting'
+                ? `第 ${g.id} 局 ${clock(g.startsAt)} 开局，正在接受下注`
+                : `第 ${g.id} 局：${g.phase}，剩 ${g.alive}/${g.players} 人${g.bettingOpen ? '' : '，已停止下注'}`,
           };
         })(),
       ];
@@ -208,6 +256,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       stopBots?.();
       wecom?.stop();
       mimic?.stop();
+      werewolf?.stop();
+      werewolf = null;
       mimic = null;
       stopBots = null;
       wecom = null;

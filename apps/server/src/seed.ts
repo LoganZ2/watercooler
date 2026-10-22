@@ -252,7 +252,16 @@ for (const m of created) {
 const botIds = await ensureBots({
   db,
   config,
-  bot: { endpoint: '', apiKey: '', model: '', bots: 12, marketsPerDay: 0, betsPerDay: 0, flipProbability: 0.2 },
+  bot: {
+    endpoint: '',
+    apiKey: '',
+    model: '',
+    bots: 12,
+    marketsPerDay: 0,
+    betsPerDay: 0,
+    flipProbability: 0.2,
+    werewolf: { players: 9, restMinutes: 10 },
+  },
   ask: async () => null,
   now: () => start,
 });

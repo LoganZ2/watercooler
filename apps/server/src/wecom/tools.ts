@@ -102,14 +102,18 @@ function compactMarket(ctx: ToolContext, m: MarketSummary) {
   };
 }
 
+/** The AI werewolf games are a module of the site alone: WeCom neither shows nor bets on them. */
 function findMarket(db: DB, id: unknown): MarketRow {
   const n = Number(id);
   if (!Number.isSafeInteger(n) || n <= 0) throw new ToolError('marketId 无效');
+  let row: MarketRow;
   try {
-    return getMarketRow(db, n);
+    row = getMarketRow(db, n);
   } catch {
     throw new ToolError(`没有 id 为 ${n} 的市场`);
   }
+  if (row.werewolf_game_id !== null) throw new ToolError(`没有 id 为 ${n} 的市场`);
+  return row;
 }
 
 /** Match an option by its label (case and surrounding spaces ignored) or by its 1-based number. */
@@ -376,7 +380,7 @@ const tools: ToolDef[] = [
       const user = getUserById(ctx.db, ctx.userId)!;
       const me = toMe(user, ctx.config, ctx.now);
       const { stats, rank } = userStatsAndRank(ctx.db, ctx.userId);
-      const bets = userBets(ctx.db, ctx.userId, ctx.now);
+      const bets = userBets(ctx.db, ctx.userId, ctx.now, { werewolf: false });
       const toResolve = listMarkets(ctx.db, ctx.now, {
         filter: 'closed',
         zone: 'any',

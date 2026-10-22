@@ -1,5 +1,15 @@
 import { z } from 'zod';
-import { MAX_BET, MAX_OUTCOMES, MIN_BET, MIN_MULTI_OUTCOMES, MIN_OUTCOMES, ORDER_TYPES, TOKENS } from './constants';
+import {
+  MAX_BET,
+  MAX_OUTCOMES,
+  MIN_BET,
+  MIN_MULTI_OUTCOMES,
+  MIN_OUTCOMES,
+  ORDER_TYPES,
+  TOKENS,
+  WEREWOLF_MAX_PLAYERS,
+  WEREWOLF_MIN_PLAYERS,
+} from './constants';
 
 const username = z
   .string()
@@ -167,7 +177,7 @@ export const wecomBindSchema = z.object({
 const adminReason = z.string().trim().min(2, '请写明原因').max(200, '原因最多 200 字');
 
 export const adminFeatureSchema = z.object({
-  key: z.enum(['aiBots', 'wecom', 'polymarket', 'mimic']),
+  key: z.enum(['aiBots', 'wecom', 'polymarket', 'mimic', 'werewolf']),
   enabled: z.boolean(),
 });
 
@@ -234,4 +244,14 @@ export const adminSiteConfigSchema = z.object({
 });
 
 /** How many of Polymarket's busiest events the mirror copies. */
+export const adminWerewolfConfigSchema = z.object({
+  players: z
+    .number()
+    .int('人数要是整数')
+    .min(WEREWOLF_MIN_PLAYERS, `至少 ${WEREWOLF_MIN_PLAYERS} 人`)
+    .max(WEREWOLF_MAX_PLAYERS, `最多 ${WEREWOLF_MAX_PLAYERS} 人`),
+  restMinutes: z.number().int('分钟数要是整数').min(1, '至少休息 1 分钟').max(120, '最多休息 120 分钟'),
+  model: z.string().trim().max(100),
+});
+
 export const adminMimicSchema = z.object({ topK: z.number().int().min(1, '至少 1 个').max(100, '最多 100 个') });

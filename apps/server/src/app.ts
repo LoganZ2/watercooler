@@ -9,6 +9,7 @@ import { userRoutes } from './routes/users';
 import { tradingRoutes } from './routes/trading';
 import { expireExchangeOrders } from './services/exchange';
 import { wecomRoutes } from './routes/wecom';
+import { werewolfRoutes } from './routes/werewolf';
 import { cancelOverdueMarkets } from './services/bets';
 
 /** Endpoints reachable without a session even in private mode. */
@@ -51,6 +52,7 @@ export function createApp(deps: AppDeps) {
   api.route('/', userRoutes(deps));
   api.route('/', tradingRoutes(deps));
   api.route('/', wecomRoutes(deps));
+  api.route('/', werewolfRoutes(deps));
   api.route('/', adminRoutes(deps));
 
   api.notFound((c) => c.json({ error: '接口不存在' }, 404));
