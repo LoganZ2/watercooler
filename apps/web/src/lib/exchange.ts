@@ -9,20 +9,22 @@ export interface ShareRef {
   token: Token;
 }
 
-export const isMultiExchange = (m: Pick<MarketSummary, 'mode' | 'outcomes'>) =>
-  m.mode === 'polymarket' && m.outcomes.length > 2;
+export const isMultiExchange = (m: Pick<MarketSummary, 'mode' | 'isBinary'>) => m.mode === 'polymarket' && !m.isBinary;
 
 export const sameShare = (a: ShareRef, b: ShareRef) => a.outcomeId === b.outcomeId && a.token === b.token;
 
 /** 「小王 · Yes」 in multi-outcome markets, just the option label otherwise. */
-export function shareName(market: Pick<MarketSummary, 'mode' | 'outcomes'>, s: ShareRef): string {
+export function shareName(market: Pick<MarketSummary, 'mode' | 'outcomes' | 'isBinary'>, s: ShareRef): string {
   const o = market.outcomes.find((x) => x.id === s.outcomeId);
   if (!o) return '';
   return isMultiExchange(market) ? `${o.label} · ${s.token === 'no' ? 'No' : 'Yes'}` : o.label;
 }
 
 /** The two shares a ticket offers for an option: its Yes and No (binary: the Yes and No options). */
-export function sharePair(market: Pick<MarketSummary, 'mode' | 'outcomes'>, outcomeId: number): [ShareRef, ShareRef] {
+export function sharePair(
+  market: Pick<MarketSummary, 'mode' | 'outcomes' | 'isBinary'>,
+  outcomeId: number,
+): [ShareRef, ShareRef] {
   if (isMultiExchange(market))
     return [
       { outcomeId, token: 'yes' },

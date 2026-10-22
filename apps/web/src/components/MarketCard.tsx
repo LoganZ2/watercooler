@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Clock, MessageCircle, Users } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { outcomeColor } from '../lib/colors';
-import { formatPct, formatRelative } from '../lib/format';
+import { formatPct, formatRelative, formatUsd } from '../lib/format';
 import { CategoryIcon } from './CategoryIcon';
 import { Money } from './Money';
 import { OutcomeQuote } from './OutcomeQuote';
@@ -20,11 +20,11 @@ export function MarketCard({ market, preview }: { market: MarketSummary; preview
   const yesNoLabels = market.isBinary && market.outcomes[0]?.label === '是';
 
   return (
-    <article className="surface card-hover group relative flex flex-col rounded-lg p-5">
+    <article className="surface card-hover group relative flex min-w-0 flex-col rounded-lg p-5">
       {!preview && <Link to={href} className="absolute inset-0 z-[1] rounded-lg" aria-label={market.question} />}
       <div className="flex items-start gap-3">
         <CategoryIcon category={market.category} size={40} />
-        <h3 className="line-clamp-2 min-h-[2.75rem] flex-1 text-[15px] leading-snug font-semibold text-fg transition-colors group-hover:text-brand">
+        <h3 className="line-clamp-2 min-h-[2.75rem] min-w-0 flex-1 text-[15px] [overflow-wrap:anywhere] leading-snug font-semibold text-fg transition-colors group-hover:text-brand">
           {market.question}
         </h3>
         {market.isBinary && market.outcomes[0] && (
@@ -109,13 +109,26 @@ export function MarketCard({ market, preview }: { market: MarketSummary; preview
         )}
       </div>
 
-      <footer className="mt-4 flex items-center gap-3 border-t border-line pt-3 text-xs text-faint">
+      <footer className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-xs text-faint">
         {market.isAi && (
           <span className="rounded bg-brand-light px-1.5 py-0.5 text-[10px] font-semibold text-brand">AI</span>
         )}
-        <span className="inline-flex items-center gap-1">
-          {market.mode === 'polymarket' ? '抵押' : '奖池'} <Money value={market.pot} compact className="text-dim" />
-        </span>
+        {market.mimic ? (
+          <span className="inline-flex items-center gap-1">
+            {market.mimic.rank !== null && (
+              <span className="rounded bg-brand-light px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                #{market.mimic.rank}
+              </span>
+            )}
+            <span title="Polymarket 24 小时成交额">
+              24h <span className="text-dim">{formatUsd(market.mimic.volume24h)}</span>
+            </span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            {market.mode === 'polymarket' ? '抵押' : '奖池'} <Money value={market.pot} compact className="text-dim" />
+          </span>
+        )}
         <span className="inline-flex items-center gap-1">
           <Users className="size-3.5" />
           {market.bettorCount}

@@ -5,8 +5,17 @@ import type { DB } from '../db';
 import { HttpError } from '../lib/http';
 import { RateLimiter } from '../lib/rateLimit';
 import { HOUR, MINUTE } from '../lib/time';
+import { createPolymarketClient, type PolymarketClient } from '../mimic/client';
 import { getUserById, type UserRow } from '../services/users';
-import { ACTION_TTL, executeAction, getAction, noticeCard, parseActionKey, setActionStatus } from './actions';
+import {
+  ACTION_TTL,
+  executeAction,
+  executeMirrorAction,
+  getAction,
+  noticeCard,
+  parseActionKey,
+  setActionStatus,
+} from './actions';
 import {
   BIND_TOKEN_TTL,
   createBindToken,
@@ -30,6 +39,8 @@ export interface WecomDeps {
   transport: WecomTransport;
   now: () => number;
   log?: (m: string) => void;
+  /** Polymarket's public APIs, for mirror orders confirmed on cards. */
+  polymarket?: PolymarketClient;
 }
 
 export interface WecomService {
@@ -59,6 +70,8 @@ export function startWecom(deps: WecomDeps): WecomService {
   const { db, config, settings, transport } = deps;
   const log = deps.log ?? ((m: string) => console.log(`[wecom] ${m}`));
   const siteUrl = settings.siteUrl.replace(/\/+$/, '');
+  let realPolymarket: PolymarketClient | undefined;
+  const polymarket = () => deps.polymarket ?? (realPolymarket ??= createPolymarketClient(config));
   const chatLimit = new RateLimiter(settings.messagesPerHour, HOUR);
   const linkLimit = new RateLimiter(5, BIND_TOKEN_TTL);
   const busy = new Set<string>();
@@ -185,7 +198,10 @@ export function startWecom(deps: WecomDeps): WecomService {
       return;
     }
     try {
-      const { marketId, detail } = executeAction(db, action, now);
+      const { marketId, detail } =
+        action.kind === 'mimic_order'
+          ? await executeMirrorAction(db, polymarket(), action, deps.now)
+          : executeAction(db, action, now);
       const url = marketUrl(siteUrl, marketId);
       const done = {
         bet: '✅ 下注成功',
@@ -194,6 +210,7 @@ export function startWecom(deps: WecomDeps): WecomService {
         cancel: '✅ 已取消市场',
         order: '✅ 订单已提交',
         cancel_order: '✅ 已撤单',
+        mimic_order: '✅ 已成交',
       }[action.kind];
       await click.update(noticeCard(action.task_id, done, detail ?? '点开查看市场', url));
     } catch (err) {

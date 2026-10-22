@@ -13,7 +13,7 @@ import { hashPassword, verifyPassword } from '../lib/password';
 import { RateLimiter } from '../lib/rateLimit';
 import { endSession, revokeSessions, startSession } from '../lib/session';
 import { MINUTE } from '../lib/time';
-import { getFeatureFlags } from '../services/admin';
+import { featureOn, getFeatureFlags } from '../services/admin';
 import { aiMarketsExist } from '../services/markets';
 import { claimDailyBonus, createUser, getUserById, getUserByUsername, toMe } from '../services/users';
 
@@ -32,6 +32,7 @@ export function authRoutes({ db, config, now, runtime }: AppDeps) {
       aiZone: Boolean(runtime?.botsRunning()) || aiMarketsExist(db),
       wecom: runtime?.wecom() !== undefined,
       polymarket: getFeatureFlags(db).polymarket,
+      mimic: featureOn(getFeatureFlags(db), 'mimic'),
     }),
   );
 

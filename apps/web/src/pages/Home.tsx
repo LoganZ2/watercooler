@@ -14,7 +14,7 @@ import { api, type MarketFilter, type MarketSort } from '../lib/api';
 import { useConfig, useMe } from '../lib/auth';
 import { outcomeColor } from '../lib/colors';
 import { formatCompact, formatPct, formatRelative, formatSigned } from '../lib/format';
-import { COPY } from '../lib/site';
+import { COPY, usePageTitle } from '../lib/site';
 
 const PriceChart = lazy(() => import('../components/PriceChart'));
 
@@ -429,6 +429,7 @@ function CallToAction() {
 }
 
 export default function Home() {
+  usePageTitle(null);
   return (
     <>
       <Hero />

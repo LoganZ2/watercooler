@@ -33,6 +33,11 @@ export interface MarketRow {
   is_ai: 0 | 1;
   /** Polymarket with 3+ options: each option has its own Yes/No book (see services/exchange). */
   neg_risk: 0 | 1;
+  /** Polymarket mirror (mimic/sync.ts): the polymarket.com event id, slug, top-K place and 24h volume. */
+  mimic_id: string | null;
+  mimic_slug: string | null;
+  mimic_rank: number | null;
+  mimic_volume: number;
   ai_checked_at: number | null;
   created_at: number;
 }
@@ -121,7 +126,12 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
       FROM outcomes o JOIN markets mk ON mk.id = o.market_id
       WHERE o.market_id IN (${placeholders(ids)}) ORDER BY o.market_id, o.idx`,
     )
-    .all(now, now, ...ids) as (OutcomeRow & { best_bid: number | null; best_ask: number | null })[];
+    .all(now, now, ...ids) as (OutcomeRow & {
+    best_bid: number | null;
+    best_ask: number | null;
+    mimic_bid: number | null;
+    mimic_ask: number | null;
+  })[];
   const byMarket = new Map<number, (typeof outcomeRows)[number][]>();
   for (const o of outcomeRows) {
     const list = byMarket.get(o.market_id) ?? [];
@@ -144,12 +154,18 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
       pool: fromCents(o.pool),
       probability: probs[i] ?? 0,
       change24h: before?.[i] !== undefined && r.status === 'open' ? (probs[i] ?? 0) - before[i]! : null,
-      ...(r.mode === 'polymarket'
-        ? {
-            bestBid: isBettable(r, now) && o.best_bid !== null ? fromCents(o.best_bid) : null,
-            bestAsk: isBettable(r, now) && o.best_ask !== null ? fromCents(o.best_ask) : null,
-          }
-        : {}),
+      ...(r.mode !== 'polymarket'
+        ? {}
+        : r.mimic_id
+          ? // Mirrors quote Polymarket's best prices as of the last sync.
+            {
+              bestBid: isBettable(r, now) && o.mimic_bid !== null ? Math.round(o.mimic_bid * 10) / 1000 : null,
+              bestAsk: isBettable(r, now) && o.mimic_ask !== null ? Math.round(o.mimic_ask * 10) / 1000 : null,
+            }
+          : {
+              bestBid: isBettable(r, now) && o.best_bid !== null ? fromCents(o.best_bid) : null,
+              bestAsk: isBettable(r, now) && o.best_ask !== null ? fromCents(o.best_ask) : null,
+            }),
     }));
     return {
       mode: r.mode,
@@ -157,7 +173,8 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
       question: r.question,
       category: r.category,
       status: derivedStatus(r, now),
-      isBinary: outcomes.length === 2,
+      // Multi-outcome Polymarket markets stay multi with two options (each option is its own Yes/No).
+      isBinary: outcomes.length === 2 && !r.neg_risk,
       isAi: r.is_ai === 1,
       pot: fromCents(r.pot),
       closeAt: r.close_at,
@@ -169,6 +186,15 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
       creator: toUserRef({ id: r.creator_id, username: r.creator_username, display_name: r.creator_display_name }),
       outcomes,
       spark: sparks.get(r.id) ?? [],
+      ...(r.mimic_id
+        ? {
+            mimic: {
+              rank: r.mimic_rank,
+              volume24h: r.mimic_volume,
+              url: `https://polymarket.com/event/${encodeURIComponent(r.mimic_slug ?? '')}`,
+            },
+          }
+        : {}),
     };
   });
 }
@@ -231,8 +257,8 @@ function sparklines(
 
 export type MarketFilter = 'active' | 'closed' | 'resolved' | 'all';
 export type MarketSort = 'trending' | 'pot' | 'new' | 'closing';
-/** People's markets, the AI zone, or both. */
-export type MarketZone = 'human' | 'ai' | 'any';
+/** People's markets, the AI zone, the Polymarket mirror, or all of them. */
+export type MarketZone = 'human' | 'ai' | 'mimic' | 'any';
 
 export interface ListMarketsOptions {
   mode?: 'pool' | 'polymarket';
@@ -265,8 +291,13 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
     case 'all':
       break;
   }
-  if (opts.zone === 'human') where.push('m.is_ai = 0');
+  if (opts.zone === 'human') where.push('m.is_ai = 0 AND m.mimic_id IS NULL');
   if (opts.zone === 'ai') where.push('m.is_ai = 1');
+  // Open mirrors are listed while they are in Polymarket's current top K.
+  if (opts.zone === 'mimic')
+    where.push(
+      `m.mimic_id IS NOT NULL${(opts.filter ?? 'active') === 'active' ? ' AND m.mimic_rank IS NOT NULL' : ''}`,
+    );
   if (opts.category) {
     where.push('m.category = @category');
     params.category = opts.category;
@@ -280,7 +311,10 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
     params.creatorId = opts.creatorId;
   }
   const order = {
-    trending: 'pot_24h DESC, m.pot DESC, m.id DESC',
+    trending:
+      opts.zone === 'mimic'
+        ? 'm.mimic_rank IS NULL, m.mimic_rank, m.mimic_volume DESC, m.id DESC'
+        : 'pot_24h DESC, m.pot DESC, m.id DESC',
     pot: 'm.pot DESC, m.id DESC',
     new: 'm.id DESC',
     closing: 'm.close_at ASC, m.id DESC',

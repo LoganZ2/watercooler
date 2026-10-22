@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppDeps } from '../src/context';
 import { createRuntime, type AppRuntime, type Runtime } from '../src/runtime';
 import type { WecomService } from '../src/wecom/bot';
-import { setup } from './helpers';
+import { fakePolymarket, setup } from './helpers';
 
 const DAY = 86_400_000;
 
@@ -45,6 +45,7 @@ async function runtimeEnv(envText?: string) {
   const restart = async () => {
     current?.stop();
     current = createRuntime({
+      polymarket: fakePolymarket().client,
       ...base,
       log: () => {},
       startBots: async () => {

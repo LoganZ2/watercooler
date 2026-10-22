@@ -48,7 +48,10 @@ export function botName(i: number): string {
 /** Create missing bot accounts and return the ids of the first `bot.bots` of them. */
 export async function ensureBots(deps: BotDeps): Promise<number[]> {
   const { db, config, bot, now } = deps;
-  const existing = db.prepare('SELECT id FROM users WHERE is_bot = 1 ORDER BY id').all() as { id: number }[];
+  // Only the accounts made here: other bot accounts (the Polymarket mirror's) are not AI bots.
+  const existing = db
+    .prepare(`SELECT id FROM users WHERE is_bot = 1 AND username LIKE ? ESCAPE '\\' ORDER BY id`)
+    .all(`${BOT_USERNAME_PREFIX.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`) as { id: number }[];
   for (let i = existing.length; i < bot.bots; i++) {
     const username = `${BOT_USERNAME_PREFIX}${String(i + 1).padStart(2, '0')}`;
     // Bots never log in; the random password just keeps the account unusable.

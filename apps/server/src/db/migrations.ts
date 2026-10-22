@@ -412,4 +412,71 @@ export const migrations: string[] = [
   INSERT INTO wecom_actions SELECT * FROM old_wecom_actions;
   DROP TABLE old_wecom_actions;
   `,
+  /* 11: Polymarket mirror (the 'mimic' feature). Mirror markets are Polymarket-mode markets copied
+        from polymarket.com events (markets.mimic_id is the event id): people trade them against the
+        site at Polymarket's live prices, so their trades never move those prices, and positions
+        (exchange_positions) settle at Polymarket's results.
+        - markets: event slug, place in the current top K (NULL once it drops out), 24h volume (USD)
+        - outcomes: the Polymarket market and CLOB tokens behind each option, the last synced best
+          bid/ask of its first token (cents), whether it still trades, its final price (cents)
+        - mimic_trades: every mirror trade, with its total in cents
+        - ledger kind 'buy' for buying mirror shares; WeCom cards can trade mirrors ('mimic_order') */ `
+  ALTER TABLE markets ADD COLUMN mimic_id TEXT;
+  ALTER TABLE markets ADD COLUMN mimic_slug TEXT;
+  ALTER TABLE markets ADD COLUMN mimic_rank INTEGER;
+  ALTER TABLE markets ADD COLUMN mimic_volume REAL NOT NULL DEFAULT 0;
+  CREATE UNIQUE INDEX markets_mimic ON markets(mimic_id) WHERE mimic_id IS NOT NULL;
+
+  ALTER TABLE outcomes ADD COLUMN mimic_market_id TEXT;
+  ALTER TABLE outcomes ADD COLUMN mimic_yes_token TEXT;
+  ALTER TABLE outcomes ADD COLUMN mimic_no_token TEXT;
+  ALTER TABLE outcomes ADD COLUMN mimic_bid REAL;
+  ALTER TABLE outcomes ADD COLUMN mimic_ask REAL;
+  ALTER TABLE outcomes ADD COLUMN mimic_open INTEGER NOT NULL DEFAULT 1 CHECK (mimic_open IN (0, 1));
+  ALTER TABLE outcomes ADD COLUMN mimic_final REAL;
+
+  CREATE TABLE mimic_trades (
+    id         INTEGER PRIMARY KEY,
+    market_id  INTEGER NOT NULL REFERENCES markets(id),
+    outcome_id INTEGER NOT NULL REFERENCES outcomes(id),
+    token      INTEGER NOT NULL CHECK (token IN (0, 1)),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    side       TEXT    NOT NULL CHECK (side IN ('buy', 'sell')),
+    quantity   INTEGER NOT NULL CHECK (quantity > 0),
+    total      INTEGER NOT NULL CHECK (total >= 0),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX mimic_trades_market ON mimic_trades(market_id, id);
+  CREATE INDEX mimic_trades_user ON mimic_trades(user_id, id);
+
+  ALTER TABLE ledger RENAME TO old_ledger;
+  CREATE TABLE ledger (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    kind          TEXT    NOT NULL CHECK (kind IN ('signup', 'bonus', 'bet', 'payout', 'refund', 'split', 'merge',
+                                                   'order_lock', 'order_release', 'sell', 'grant', 'buy')),
+    amount        INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    market_id     INTEGER REFERENCES markets(id),
+    note          TEXT,
+    created_at    INTEGER NOT NULL
+  );
+  INSERT INTO ledger SELECT * FROM old_ledger;
+  DROP TABLE old_ledger;
+  CREATE INDEX ledger_user ON ledger(user_id, id);
+
+  ALTER TABLE wecom_actions RENAME TO old_wecom_actions;
+  CREATE TABLE wecom_actions (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    wecom_userid TEXT    NOT NULL,
+    kind         TEXT    NOT NULL CHECK (kind IN ('bet', 'create', 'resolve', 'cancel', 'order', 'cancel_order', 'mimic_order')),
+    payload      TEXT    NOT NULL,
+    task_id      TEXT    NOT NULL UNIQUE,
+    status       TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed', 'cancelled')),
+    created_at   INTEGER NOT NULL
+  );
+  INSERT INTO wecom_actions SELECT * FROM old_wecom_actions;
+  DROP TABLE old_wecom_actions;
+  `,
 ];

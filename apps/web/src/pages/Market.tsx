@@ -1,7 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CURRENCY_NAME, payoutFor, type MarketDetail, type Stake } from '@watercooler/shared';
 import clsx from 'clsx';
-import { Ban, CalendarClock, ChevronLeft, Crown, Gavel, MessageCircle, ScrollText, Trash2, Users } from 'lucide-react';
+import {
+  Ban,
+  CalendarClock,
+  ChevronLeft,
+  Crown,
+  ExternalLink,
+  Gavel,
+  MessageCircle,
+  ScrollText,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -18,7 +29,16 @@ import { api, errorMessage, type HistoryRange } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { outcomeColor } from '../lib/colors';
 import { isMultiExchange, type ShareRef } from '../lib/exchange';
-import { formatDate, formatMoney, formatMultiplier, formatPct, formatRelative, formatSigned } from '../lib/format';
+import {
+  formatDate,
+  formatMoney,
+  formatMultiplier,
+  formatPct,
+  formatRelative,
+  formatSigned,
+  formatUsd,
+} from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 const PriceChart = lazy(() => import('../components/PriceChart'));
 
@@ -179,21 +199,27 @@ function ResolutionBanner({ market }: { market: MarketDetail }) {
       <div className="text-sm">
         <div className="font-semibold">
           {market.status === 'resolved'
-            ? `已公布结果：「${winner?.label}」`
-            : market.status === 'cancelled'
-              ? market.mode === 'polymarket'
-                ? '市场已取消，Yes / No 每份已兑回 0.50 水滴'
-                : '市场已取消，所有下注已全额退回'
-              : market.mode === 'polymarket'
-                ? `交易已停止，等待 ${market.creator.displayName} 在结算时间到达后公布结果`
-                : `下注已截止，等待 ${market.creator.displayName} 公布结果`}
+            ? market.mimic
+              ? `已按 Polymarket 的结果结算${winner ? `：「${winner.label}」` : ''}`
+              : `已公布结果：「${winner?.label}」`
+            : market.mimic
+              ? 'Polymarket 已停止交易，等它公布结果后自动结算'
+              : market.status === 'cancelled'
+                ? market.mode === 'polymarket'
+                  ? '市场已取消，Yes / No 每份已兑回 0.50 水滴'
+                  : '市场已取消，所有下注已全额退回'
+                : market.mode === 'polymarket'
+                  ? `交易已停止，等待 ${market.creator.displayName} 在结算时间到达后公布结果`
+                  : `下注已截止，等待 ${market.creator.displayName} 公布结果`}
         </div>
         {market.resolutionNote && <div className="mt-1 text-fg/70">{market.resolutionNote}</div>}
         <div className="mt-1 text-xs opacity-70">
           {market.status === 'closed'
-            ? market.mode === 'polymarket'
-              ? `结算时间：${formatDate(market.settleAt)}；未公布时保留持仓和资金，继续等待结算。`
-              : `结算时间：${formatDate(market.settleAt)}；${formatDate(market.resolveBy!)} 前未公布会自动取消退款。`
+            ? market.mimic
+              ? '持仓和资金一直保留，Polymarket 公布结果后按每份 1 / 0 兑付。'
+              : market.mode === 'polymarket'
+                ? `结算时间：${formatDate(market.settleAt)}；未公布时保留持仓和资金，继续等待结算。`
+                : `结算时间：${formatDate(market.settleAt)}；${formatDate(market.resolveBy!)} 前未公布会自动取消退款。`
             : market.resolvedAt && formatDate(market.resolvedAt)}
         </div>
       </div>
@@ -500,12 +526,15 @@ export default function Market() {
   });
   const [picked, setPicked] = useState<ShareRef | null>(null);
   const [intent, setIntent] = useState<TicketIntent | null>(null);
+  // A mirror's live book is fetched from Polymarket for the option in view only.
+  const mirrorFocus = data?.market.mimic ? (picked?.outcomeId ?? null) : null;
   const exchange = useQuery({
-    queryKey: ['exchange', id, me?.id],
-    queryFn: () => api.exchange(id),
+    queryKey: ['exchange', id, me?.id, mirrorFocus],
+    queryFn: () => api.exchange(id, mirrorFocus ?? undefined),
     enabled: data?.market.mode === 'polymarket',
     refetchInterval: 3000,
   });
+  usePageTitle(data?.market.question);
 
   useEffect(() => {
     setIntent(null);
@@ -550,15 +579,20 @@ export default function Market() {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-5">
-        <Link to={market.isAi ? '/ai' : '/'} className="inline-flex items-center gap-1 text-sm text-dim hover:text-fg">
-          <ChevronLeft className="size-4" /> {market.isAi ? 'AI 专区' : '全部市场'}
+        <Link
+          to={market.isAi ? '/ai' : market.mimic ? '/polymarket' : '/'}
+          className="inline-flex items-center gap-1 text-sm text-dim hover:text-fg"
+        >
+          <ChevronLeft className="size-4" /> {market.isAi ? 'AI 专区' : market.mimic ? 'Polymarket 热门' : '全部市场'}
         </Link>
         <header className="flex items-start gap-4">
           <CategoryIcon category={market.category} size={60} className="hidden sm:inline-flex" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{market.category}</Badge>
-              <Badge>{market.mode === 'polymarket' ? 'Polymarket' : '奖池模式'}</Badge>
+              <Badge>
+                {market.mimic ? 'Polymarket 镜像' : market.mode === 'polymarket' ? 'Polymarket' : '奖池模式'}
+              </Badge>
               {market.isAi && <Badge className="bg-brand-light text-brand">AI 出题</Badge>}
               <StatusBadge market={market} />
             </div>
@@ -566,9 +600,21 @@ export default function Market() {
               {market.question}
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-dim">
-              <span className="inline-flex items-center gap-1.5">
-                {market.mode === 'polymarket' ? '抵押资金' : '奖池'} <Money value={market.pot} />
-              </span>
+              {market.mimic ? (
+                <a
+                  href={market.mimic.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 hover:text-brand"
+                >
+                  Polymarket 24h 成交 {formatUsd(market.mimic.volume24h)}
+                  <ExternalLink className="size-3.5" />
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1.5">
+                  {market.mode === 'polymarket' ? '抵押资金' : '奖池'} <Money value={market.pot} />
+                </span>
+              )}
               <span className="inline-flex items-center gap-1.5">
                 <Users className="size-4 text-faint" /> {market.bettorCount} 人
                 {market.mode === 'polymarket' ? '持仓' : '下注'}
@@ -576,10 +622,12 @@ export default function Market() {
               <span className="inline-flex items-center gap-1.5">
                 <CalendarClock className="size-4 text-faint" /> {formatDate(market.closeAt)} 停止交易
               </span>
-              <Link to={`/u/${market.creator.id}`} className="inline-flex items-center gap-1.5 hover:text-fg">
-                <Avatar id={market.creator.id} name={market.creator.displayName} size={18} />
-                {market.creator.displayName} 发起
-              </Link>
+              {!market.mimic && (
+                <Link to={`/u/${market.creator.id}`} className="inline-flex items-center gap-1.5 hover:text-fg">
+                  <Avatar id={market.creator.id} name={market.creator.displayName} size={18} />
+                  {market.creator.displayName} 发起
+                </Link>
+              )}
             </div>
           </div>
         </header>
@@ -590,7 +638,6 @@ export default function Market() {
             {!market.isBinary && (
               <ExchangeOutcomes
                 market={market}
-                data={exchange.data}
                 selected={selected}
                 onPick={(s) => {
                   selectShare(s);
@@ -605,7 +652,8 @@ export default function Market() {
               share={share}
               onShareChange={(s) => selectShare(s, false)}
               onQuoteSelect={(side, price) => {
-                ticket({ side, mode: 'limit', price });
+                // Mirrors only take market orders against Polymarket's book.
+                ticket(market.mimic ? { side, mode: 'market' } : { side, mode: 'limit', price });
                 focusTrade();
               }}
             />
@@ -655,6 +703,12 @@ export default function Market() {
           <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap text-fg">
             {market.description || '发起人没有填写额外说明。以常识和公开信息为准，由发起人公布结果。'}
           </p>
+          {market.mimic && (
+            <p className="mt-3 rounded bg-raised p-3 text-xs leading-relaxed text-dim">
+              这是 polymarket.com 上的盘的镜像，规则和结果都以 Polymarket 为准（上面是它的英文规则原文）。大家在这里按
+              Polymarket 的实时盘口用水滴买卖，交易不会影响 Polymarket 的价格；它结算后这里自动兑付。
+            </p>
+          )}
           {market.isAi && (
             <p className="mt-3 rounded bg-raised p-3 text-xs leading-relaxed text-dim">
               这道题是 AI

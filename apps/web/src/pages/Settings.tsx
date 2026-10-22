@@ -5,6 +5,7 @@ import { Button, Card, Field, Input } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useConfig, useMe } from '../lib/auth';
 import { formatDate } from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 /** The WeCom (企业微信) binding: shown when the bot is on, or while an old binding is still around. */
 function WecomSection() {
@@ -45,6 +46,7 @@ function WecomSection() {
 }
 
 export default function SettingsPage() {
+  usePageTitle('账号设置');
   const { me } = useMe();
   const qc = useQueryClient();
   const [displayName, setDisplayName] = useState(me?.displayName ?? '');

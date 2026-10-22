@@ -6,6 +6,7 @@ import {
   fromCents,
   resolveMarketSchema,
   convertSchema,
+  mimicOrderSchema,
   orderSchema,
   shareAmountSchema,
   type BetResult,
@@ -29,6 +30,8 @@ import {
   type MarketZone,
 } from '../services/markets';
 import { getUserById } from '../services/users';
+import { createPolymarketClient, type PolymarketClient } from '../mimic/client';
+import { mirrorActivity, mirrorState, placeMirrorOrder } from '../services/mimic';
 import {
   cancelOrder,
   convertShares,
@@ -42,16 +45,33 @@ import {
 const pick = <T extends string>(value: string | undefined, allowed: readonly T[], fallback: T): T =>
   allowed.includes(value as T) ? (value as T) : fallback;
 
-export function marketRoutes({ db, now }: AppDeps) {
+export function marketRoutes({ db, config, now, polymarket: client }: AppDeps) {
   const app = new Hono<AppEnv>();
+  let real: PolymarketClient | undefined;
+  const polymarket = () => client ?? (real ??= createPolymarketClient(config));
 
-  app.get('/markets/:id/exchange', (c) =>
-    c.json(exchangeState(db, parseId(c.req.param('id')), now(), c.get('user')?.id)),
-  );
+  const isMirror = (id: number) => getMarketRow(db, id).mimic_id !== null;
+  app.get('/markets/:id/exchange', async (c) => {
+    const id = parseId(c.req.param('id'));
+    // Mirrors show Polymarket's live book of the option in view (?outcome=).
+    if (isMirror(id))
+      return c.json(
+        await mirrorState(db, polymarket(), id, c.get('user')?.id, Number(c.req.query('outcome')) || undefined),
+      );
+    return c.json(exchangeState(db, id, now(), c.get('user')?.id));
+  });
   app.get('/markets/:id/exchange/holders', (c) => c.json(exchangeHolders(db, parseId(c.req.param('id')))));
   app.get('/markets/:id/exchange/activity', (c) => {
+    const id = parseId(c.req.param('id'));
     const before = Number(c.req.query('before')) || undefined;
-    return c.json(exchangeActivity(db, parseId(c.req.param('id')), { before, limit: 50 }));
+    return c.json(
+      isMirror(id) ? mirrorActivity(db, id, { before, limit: 100 }) : exchangeActivity(db, id, { before, limit: 50 }),
+    );
+  });
+  app.post('/markets/:id/mimic/order', async (c) => {
+    const user = requireUser(c);
+    const input = await parseBody(c, mimicOrderSchema);
+    return c.json(await placeMirrorOrder(db, polymarket(), user.id, parseId(c.req.param('id')), input, now), 201);
   });
   app.post('/markets/:id/orders', async (c) => {
     const user = requireUser(c);
@@ -85,7 +105,7 @@ export function marketRoutes({ db, now }: AppDeps) {
       listMarkets(db, now(), {
         mode: q.mode as 'pool' | 'polymarket' | undefined,
         filter: pick<MarketFilter>(q.filter, ['active', 'closed', 'resolved', 'all'], 'active'),
-        zone: pick<MarketZone>(q.zone, ['human', 'ai', 'any'], 'human'),
+        zone: pick<MarketZone>(q.zone, ['human', 'ai', 'mimic', 'any'], 'human'),
         sort: pick<MarketSort>(q.sort, ['trending', 'pot', 'new', 'closing'], 'trending'),
         category: q.category || undefined,
         search: q.q?.trim() || undefined,

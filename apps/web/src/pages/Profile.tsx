@@ -9,11 +9,13 @@ import { BetsTable } from '../components/BetsTable';
 import { Card, Empty, PageLoader, Segmented, Stat } from '../components/ui';
 import { api } from '../lib/api';
 import { formatDay, formatRelative } from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 export default function Profile() {
   const id = Number(useParams().id);
   const [tab, setTab] = useState<'bets' | 'history' | 'markets'>('bets');
   const { data, error } = useQuery({ queryKey: ['user', id], queryFn: () => api.user(id) });
+  usePageTitle(data ? `${data.user.displayName}的主页` : null);
   if (error) return <Empty title="用户不存在" />;
   if (!data) return <PageLoader />;
   const { user, stats, rank, bets, recentBets, createdMarkets } = data;

@@ -4,9 +4,11 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { Button, buttonClass, Card, Empty, PageLoader } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useMe } from '../lib/auth';
+import { usePageTitle } from '../lib/site';
 
 /** Opened from the link the WeCom bot posts in a group: confirm before tying the accounts together. */
 export default function BindWecom() {
+  usePageTitle('绑定企业微信');
   const { token = '' } = useParams();
   const { me } = useMe();
   const navigate = useNavigate();

@@ -9,6 +9,7 @@ import { Money } from '../components/Money';
 import { Card, Empty, Segmented, Stat } from '../components/ui';
 import { api, type MarketFilter } from '../lib/api';
 import { formatRelative } from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 const FILTERS: { value: MarketFilter; label: string }[] = [
   { value: 'active', label: '进行中' },
@@ -17,6 +18,7 @@ const FILTERS: { value: MarketFilter; label: string }[] = [
 ];
 
 export default function AiZone() {
+  usePageTitle('AI 专区');
   const [filter, setFilter] = useState<MarketFilter>('active');
   const { data: zone } = useQuery({ queryKey: ['aiZone'], queryFn: api.aiZone, refetchInterval: 30_000 });
   const { data: markets, isPending } = useQuery({

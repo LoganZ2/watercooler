@@ -84,14 +84,16 @@ export function ExchangePanel({
   const [expires, setExpires] = useState(() => toLocalInput(Date.now() + 86_400_000));
   const [postOnly, setPostOnly] = useState(false);
   const action = useExchangeAction(market.id, '已提交');
+  // Mirrors trade at Polymarket's live book: market orders only, against the site.
+  const mirror = Boolean(market.mimic);
 
   useEffect(() => {
     if (!intent) return;
     setSide(intent.side);
-    setMode(intent.mode);
+    setMode(mirror ? 'market' : intent.mode);
     if (intent.price) setPrice(intent.price);
     if (intent.quantity) setShares(intent.quantity);
-  }, [intent]);
+  }, [intent, mirror]);
 
   if (error)
     return (
@@ -155,15 +157,19 @@ export function ExchangePanel({
               { value: 'sell', label: '卖出' },
             ]}
           />
-          <Segmented
-            size="sm"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'market', label: '市价' },
-              { value: 'limit', label: '限价' },
-            ]}
-          />
+          {mirror ? (
+            <span className="text-xs text-faint">按 Polymarket 实时价</span>
+          ) : (
+            <Segmented
+              size="sm"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'market', label: '市价' },
+                { value: 'limit', label: '限价' },
+              ]}
+            />
+          )}
         </div>
         {isMultiExchange(market) && (
           <p className="text-sm font-medium">{market.outcomes.find((o) => o.id === share.outcomeId)?.label}</p>
@@ -216,7 +222,11 @@ export function ExchangePanel({
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              if (valid && affordable) action.mutate(() => api.order(market.id, input));
+              if (!valid || !affordable) return;
+              if (mirror && input.type !== 'GTC' && input.type !== 'GTD') {
+                const { outcomeId, token, side, type, amount, quantity } = input;
+                action.mutate(() => api.mimicOrder(market.id, { outcomeId, token, side, type, amount, quantity }));
+              } else action.mutate(() => api.order(market.id, input));
             }}
           >
             {mode === 'market' ? (
@@ -358,9 +368,11 @@ export function ExchangePanel({
               {buy ? '买入' : '卖出'} {name}
             </Button>
             <p className="text-xs leading-relaxed text-faint">
-              {mode === 'market'
-                ? '市价单按盘口从最优价逐档成交，只买整份，不会挂单；没成交的部分直接取消。'
-                : '限价单按价格、时间优先撮合，可部分成交；没成交的部分挂在订单簿上，可随时撤销。'}
+              {mirror
+                ? '按 Polymarket 的实时盘口从最优价逐档成交，只买整份；对手是本站，你的买卖不影响 Polymarket。结果以 Polymarket 为准。'
+                : mode === 'market'
+                  ? '市价单按盘口从最优价逐档成交，只买整份，不会挂单；没成交的部分直接取消。'
+                  : '限价单按价格、时间优先撮合，可部分成交；没成交的部分挂在订单簿上，可随时撤销。'}
               无交易手续费。
             </p>
           </form>
@@ -417,8 +429,14 @@ function MyOrders({ market, data }: { market: MarketDetail; data: ExchangeState 
   const openCount = data.orders.filter((o) => o.status === 'open').length;
   return (
     <Card className="p-5">
-      <h3 className="mb-1 font-semibold">我的订单 · 未成交 {openCount} 笔</h3>
-      <p className="mb-2 text-xs text-faint">撤单释放未成交部分的冻结资金或份额，已成交部分保留。</p>
+      {market.mimic ? (
+        <h3 className="mb-2 font-semibold">我的成交</h3>
+      ) : (
+        <>
+          <h3 className="mb-1 font-semibold">我的订单 · 未成交 {openCount} 笔</h3>
+          <p className="mb-2 text-xs text-faint">撤单释放未成交部分的冻结资金或份额，已成交部分保留。</p>
+        </>
+      )}
       <ul className="max-h-56 divide-y divide-line overflow-y-auto">
         {data.orders.map((o) => (
           <li key={o.id} className="py-3 text-xs">
@@ -458,6 +476,13 @@ function MyOrders({ market, data }: { market: MarketDetail; data: ExchangeState 
       {!data.orders.length && <p className="text-xs text-faint">暂无订单</p>}
     </Card>
   );
+}
+
+/** The price shown for an option (the Yes price; No is the rest). */
+function markPrice(market: MarketDetail, s: ShareRef): number | null {
+  const o = market.outcomes.find((x) => x.id === s.outcomeId);
+  if (!o) return null;
+  return s.token === 'no' ? 1 - o.probability : o.probability;
 }
 
 /** Whether a share paid out in a resolved market. */
@@ -502,7 +527,13 @@ export function ExchangePositions({
       ) : (
         <ul className="divide-y divide-line">
           {held.map((p) => {
-            const now = market.status === 'resolved' ? (pays(market, p) ? 1 : 0) : displayPrice(bookOf(data, p));
+            // Mirrors only load the book of the option in view; the others use the synced price.
+            const now =
+              market.status === 'resolved'
+                ? pays(market, p)
+                  ? 1
+                  : 0
+                : (displayPrice(bookOf(data, p)) ?? markPrice(market, p));
             const value = now === null ? null : now * p.quantity;
             const pnl = value === null ? null : value - p.cost;
             return (
@@ -536,7 +567,7 @@ export function ExchangePositions({
       {held.length > 0 && (
         <p className="text-xs text-faint">估值按当前显示价格计算，只供参考；排行榜和净值只在结算后计入。</p>
       )}
-      {open && (
+      {open && !market.mimic && (
         <section className="space-y-3 border-t border-line pt-4">
           <h3 className="text-sm font-semibold">拆分 / 合并</h3>
           {multi && (
@@ -579,7 +610,7 @@ export function ExchangePositions({
           <p className="text-xs text-faint">1 水滴 ⇄ 1 Yes + 1 No。合并只用没挂卖的份额，当前可合并 {mergeable} 对。</p>
         </section>
       )}
-      {open && multi && (
+      {open && multi && !market.mimic && (
         <section className="space-y-3 border-t border-line pt-4">
           <h3 className="text-sm font-semibold">转换 No 份额</h3>
           <div className="flex flex-wrap gap-2">

@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { fromCents, type CreateMarketInput, type OrderInput } from '@watercooler/shared';
+import { fromCents, type CreateMarketInput, type MimicOrderInput, type OrderInput } from '@watercooler/shared';
 import type { DB } from '../db';
 import { conflict } from '../lib/http';
 import { MINUTE } from '../lib/time';
 import { cancelMarket, placeBet, resolveMarket } from '../services/bets';
 import { cancelOrder, placeOrder } from '../services/exchange';
+import type { PolymarketClient } from '../mimic/client';
+import { placeMirrorOrder } from '../services/mimic';
 import { createMarket } from '../services/markets';
 import type { Card } from './transport';
 
@@ -17,7 +19,8 @@ export type ActionPayload =
   | { kind: 'resolve'; marketId: number; outcomeId: number; note?: string }
   | { kind: 'cancel'; marketId: number; note?: string }
   | { kind: 'order'; marketId: number; input: OrderInput }
-  | { kind: 'cancel_order'; marketId: number; orderId: number };
+  | { kind: 'cancel_order'; marketId: number; orderId: number }
+  | { kind: 'mimic_order'; marketId: number; input: MimicOrderInput };
 
 export interface ActionRow {
   id: number;
@@ -110,8 +113,37 @@ export function executeAction(db: DB, action: ActionRow, now: number): { marketI
       case 'cancel_order':
         cancelOrder(db, action.user_id, p.marketId, p.orderId, now);
         return { marketId: p.marketId, detail: '未成交部分已撤销，冻结的资金或份额已释放' };
+      case 'mimic_order':
+        throw new Error('mirror orders go through executeMirrorAction');
     }
   })();
+}
+
+/**
+ * A confirmed Polymarket mirror order: claim the card first (the live book is fetched in between),
+ * then trade at that book. A failure marks the card failed.
+ */
+export async function executeMirrorAction(
+  db: DB,
+  client: PolymarketClient,
+  action: ActionRow,
+  now: () => number,
+): Promise<{ marketId: number; detail: string }> {
+  const claimed = db
+    .prepare(`UPDATE wecom_actions SET status = 'done' WHERE id = ? AND status = 'pending'`)
+    .run(action.id);
+  if (claimed.changes === 0) throw conflict('这个操作已经处理过了');
+  const p = JSON.parse(action.payload) as Extract<ActionPayload, { kind: 'mimic_order' }>;
+  try {
+    const t = await placeMirrorOrder(db, client, action.user_id, p.marketId, p.input, now);
+    return {
+      marketId: p.marketId,
+      detail: `${t.side === 'buy' ? '买入' : '卖出'} ${t.quantity} 份，均价 ${t.avgPrice.toFixed(3)}，${t.side === 'buy' ? '花了' : '收到'} ${t.total}`,
+    };
+  } catch (err) {
+    setActionStatus(db, action.id, 'failed');
+    throw err;
+  }
 }
 
 /** Card values are best kept short; WeCom truncates long ones anyway. */

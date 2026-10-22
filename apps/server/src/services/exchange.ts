@@ -120,6 +120,9 @@ export function describeShare(db: DB, marketId: number, outcomeId: number, token
 function exchangeMarket(db: DB, marketId: number, now?: number, userId?: number) {
   const m = getMarketRow(db, marketId);
   if (m.mode !== 'polymarket') throw badRequest('此市场不是 Polymarket 模式');
+  // Mirrors trade at Polymarket's prices (services/mimic.ts), never through this order book.
+  if (now !== undefined && m.mimic_id)
+    throw badRequest('Polymarket 镜像盘按 Polymarket 的实时报价买卖，不能挂单或拆分');
   if (now !== undefined && !isBettable(m, now)) throw conflict('交易已截止');
   if (userId !== undefined && !m.is_ai) {
     const user = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(userId) as { is_bot: number } | undefined;
@@ -131,7 +134,7 @@ function exchangeMarket(db: DB, marketId: number, now?: number, userId?: number)
 /** Open orders that have not passed their GTD expiry (expired ones are released by the sweep). */
 const LIVE = `status = 'open' AND (expires_at IS NULL OR expires_at > @now)`;
 
-function position(db: DB, userId: number, marketId: number, s: Share, quantity: number, reserved = 0, cost = 0) {
+export function position(db: DB, userId: number, marketId: number, s: Share, quantity: number, reserved = 0, cost = 0) {
   db.prepare(
     `INSERT INTO exchange_positions (user_id, market_id, outcome_id, token) VALUES (?, ?, ?, ?)
     ON CONFLICT(user_id, outcome_id, token) DO NOTHING`,
@@ -143,7 +146,14 @@ function position(db: DB, userId: number, marketId: number, s: Share, quantity: 
 }
 
 /** Remove shares at their average cost; returns the cost basis taken out. */
-function takeShares(db: DB, userId: number, marketId: number, s: Share, quantity: number, reserved: boolean): number {
+export function takeShares(
+  db: DB,
+  userId: number,
+  marketId: number,
+  s: Share,
+  quantity: number,
+  reserved: boolean,
+): number {
   const row = db
     .prepare('SELECT quantity, cost FROM exchange_positions WHERE user_id = ? AND outcome_id = ? AND token = ?')
     .get(userId, s.outcome, s.token) as { quantity: number; cost: number } | undefined;
@@ -152,7 +162,7 @@ function takeShares(db: DB, userId: number, marketId: number, s: Share, quantity
   return removed;
 }
 
-function available(db: DB, userId: number, s: Share): number {
+export function available(db: DB, userId: number, s: Share): number {
   return (
     (
       db
@@ -596,6 +606,18 @@ const toPosition = (p: {
   avgPrice: p.quantity ? Math.round(p.cost / p.quantity) / 100 : null,
 });
 
+/** One person's shares in a market, in option order. */
+export function userPositions(db: DB, marketId: number, userId: number): ExchangePosition[] {
+  return (
+    db
+      .prepare(
+        `SELECT p.* FROM exchange_positions p JOIN outcomes o ON o.id = p.outcome_id
+        WHERE p.market_id = ? AND p.user_id = ? ORDER BY o.idx, p.token`,
+      )
+      .all(marketId, userId) as Parameters<typeof toPosition>[0][]
+  ).map(toPosition);
+}
+
 export function exchangeState(db: DB, marketId: number, now: number, userId?: number): ExchangeState {
   const sh = sharesOf(db, exchangeMarket(db, marketId));
   const trades = db
@@ -618,16 +640,7 @@ export function exchangeState(db: DB, marketId: number, now: number, userId?: nu
       asks: levels(db, sh, s, 'sell', now),
       lastPrice: lastPrice(sh, s) === null ? null : fromCents(lastPrice(sh, s)!),
     })),
-    positions: userId
-      ? (
-          db
-            .prepare(
-              `SELECT p.* FROM exchange_positions p JOIN outcomes o ON o.id = p.outcome_id
-              WHERE p.market_id = ? AND p.user_id = ? ORDER BY o.idx, p.token`,
-            )
-            .all(marketId, userId) as Parameters<typeof toPosition>[0][]
-        ).map(toPosition)
-      : [],
+    positions: userId ? userPositions(db, marketId, userId) : [],
     orders: userId
       ? (
           db

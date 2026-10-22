@@ -6,7 +6,9 @@ import { createAsk, createChat } from './bots/llm';
 import { startBots } from './bots/scheduler';
 import type { Config } from './config';
 import type { DB } from './db';
-import { getFeatureFlags, seedFeatureFlags } from './services/admin';
+import { createPolymarketClient, type PolymarketClient } from './mimic/client';
+import { startMimic, type MimicService } from './mimic/sync';
+import { featureOn, getFeatureFlags, seedFeatureFlags } from './services/admin';
 import { startWecom, type WecomService } from './wecom/bot';
 import { connectWecom } from './wecom/transport';
 
@@ -17,6 +19,8 @@ export interface AppRuntime {
   features(): FeatureState[];
   /** Start or stop the services to match the feature flags. */
   apply(): Promise<void>;
+  /** Run a Polymarket mirror pass now instead of at the next interval. */
+  syncMimic?(): Promise<void>;
 }
 
 export interface Runtime extends AppRuntime {
@@ -31,6 +35,8 @@ export interface RuntimeDeps {
   /** Overridable in tests; both default to the real bots and WeCom connection. */
   startBots?: (bot: BotConfig) => Promise<() => void>;
   startWecom?: (bot: BotConfig) => WecomService;
+  /** Polymarket's public APIs, for the mirror; tests pass a fake. */
+  polymarket?: PolymarketClient;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -58,7 +64,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     ((bot: BotConfig) => {
       const wecomLog = (m: string) => log(`[wecom] ${m}`);
       const transport = connectWecom(bot.wecom!, wecomLog);
-      return startWecom({ db, config, settings: bot.wecom!, chat: createChat(bot), transport, now, log: wecomLog });
+      return startWecom({
+        db,
+        config,
+        settings: bot.wecom!,
+        chat: createChat(bot),
+        transport,
+        now,
+        log: wecomLog,
+        polymarket: deps.polymarket,
+      });
     });
 
   // bot.json is read once, at the first apply(): changed credentials take effect after a restart,
@@ -70,6 +85,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   let botsProblem: string | null = null;
   let wecom: WecomService | null = null;
   let wecomProblem: string | null = null;
+  // The mirror always runs: with the flag off it still settles positions people hold.
+  let mimic: MimicService | null = null;
+  let mimicWasOn = false;
 
   async function sync(): Promise<void> {
     if (!loaded) {
@@ -100,6 +118,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
+    mimic ??= startMimic({
+      db,
+      client: deps.polymarket ?? createPolymarketClient(config),
+      now,
+      enabled: () => featureOn(getFeatureFlags(db), 'mimic'),
+      log,
+    });
+    const mimicOn = featureOn(flags, 'mimic');
+    if (mimicOn && !mimicWasOn) void mimic.syncNow();
+    mimicWasOn = mimicOn;
+
     if (wecom && !flags.wecom) {
       wecom.stop();
       wecom = null;
@@ -126,6 +155,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       queue = queue.then(sync, sync);
       return queue;
     },
+    syncMimic: () => mimic?.syncNow() ?? Promise.resolve(),
     features() {
       const flags = getFeatureFlags(db);
       const noConfig = botError ? `缺少配置：bot.json 有误（${botError}）` : '缺少配置：服务器上没有 bot.json';
@@ -155,11 +185,30 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
                   : noConfig,
         },
         { key: 'polymarket', enabled: flags.polymarket, configured: null, active: flags.polymarket, problem: null },
+        (() => {
+          const on = featureOn(flags, 'mimic');
+          const s = mimic?.status();
+          return {
+            key: 'mimic' as const,
+            enabled: on,
+            configured: null,
+            requires: 'polymarket' as const,
+            active: on && Boolean(s?.lastSync) && !s?.error,
+            problem: on && s?.error ? `同步失败：${s.error}` : null,
+            status: !on
+              ? null
+              : s?.lastSync
+                ? `${new Intl.DateTimeFormat('zh-CN', { timeZone: config.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(s.lastSync)} 同步过，正在镜像 ${s.listed} 个盘`
+                : '等待第一次同步',
+          };
+        })(),
       ];
     },
     stop() {
       stopBots?.();
       wecom?.stop();
+      mimic?.stop();
+      mimic = null;
       stopBots = null;
       wecom = null;
     },

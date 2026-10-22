@@ -4,6 +4,7 @@ import { RequireAuth } from './components/RequireAuth';
 import { RouteError } from './components/RouteError';
 import AdminPage from './pages/Admin';
 import AiZone from './pages/AiZone';
+import PolymarketMirror from './pages/PolymarketMirror';
 import BindWecom from './pages/BindWecom';
 import CreateMarket from './pages/CreateMarket';
 import Home from './pages/Home';
@@ -24,6 +25,7 @@ export const router = createBrowserRouter(
         { path: '/', element: <Home /> },
         { path: '/market/:id', element: <Market /> },
         { path: '/ai', element: <AiZone /> },
+        { path: '/polymarket', element: <PolymarketMirror /> },
         { path: '/leaderboard', element: <Leaderboard /> },
         { path: '/u/:id', element: <Profile /> },
         { path: '/login', element: <Login /> },

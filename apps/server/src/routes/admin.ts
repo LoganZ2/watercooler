@@ -5,6 +5,7 @@ import {
   adminSiteConfigSchema,
   adminWecomConfigSchema,
   adminGrantAllSchema,
+  adminMimicSchema,
   adminUserSchema,
   type AdminAuditEntry,
   type AdminInstanceConfig,
@@ -17,6 +18,9 @@ import { conflict, parseBody } from '../lib/http';
 import {
   adjustUserBalance,
   audit,
+  FEATURE_REQUIRES,
+  featureOn,
+  getFeatureFlags,
   grantAll,
   listAudit,
   listUsers,
@@ -32,6 +36,7 @@ import {
   saveSiteConfig,
   saveWecomConfig,
 } from '../services/instanceConfig';
+import { getMimicTopK, setMimicTopK } from '../mimic/sync';
 
 /** Instance management; every route needs an admin (see requireAdmin). */
 export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
@@ -50,6 +55,7 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
     restartAvailable: restart !== undefined,
     restartNeeded: restartNeeded(),
     features: runtime?.features() ?? [],
+    mimicTopK: getMimicTopK(db),
     money: moneyOverview(db),
   });
 
@@ -74,9 +80,20 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
           : '还没有 AI 模型配置：先在「配置」里填写并重启',
       );
     }
+    const needs = FEATURE_REQUIRES[key];
+    if (enabled && needs && !featureOn(getFeatureFlags(db), needs)) throw conflict('先打开「Polymarket 模式」');
     setFeatureFlag(db, admin.id, key, enabled, now());
     // Bots and the WeCom bot start or stop right away; Polymarket is checked on every new market.
     await runtime?.apply();
+    return c.json(overview());
+  });
+
+  app.post('/admin/mimic', async (c) => {
+    const admin = requireAdmin(c);
+    const { topK } = await parseBody(c, adminMimicSchema);
+    setMimicTopK(db, admin.id, topK, now());
+    // The next pass picks up the new size; start one now rather than in a few minutes.
+    void runtime?.syncMimic?.();
     return c.json(overview());
   });
 

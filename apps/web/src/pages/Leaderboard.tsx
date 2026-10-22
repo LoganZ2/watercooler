@@ -9,7 +9,7 @@ import { Card, PageLoader, Segmented } from '../components/ui';
 import { api, type LeaderboardSort } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { formatSigned } from '../lib/format';
-import { COPY } from '../lib/site';
+import { COPY, usePageTitle } from '../lib/site';
 
 /** Podium order on screen is 2nd, 1st, 3rd. */
 const PODIUM = [
@@ -19,6 +19,7 @@ const PODIUM = [
 ];
 
 export default function Leaderboard() {
+  usePageTitle('预言家排行榜');
   const { me } = useMe();
   const [sort, setSort] = useState<LeaderboardSort>('profit');
   const { data } = useQuery({ queryKey: ['leaderboard', sort], queryFn: () => api.leaderboard(sort) });

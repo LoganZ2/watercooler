@@ -8,7 +8,7 @@ import { Drop } from '../components/Money';
 import { Button, Field, Input } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useConfig, useMe } from '../lib/auth';
-import { COPY } from '../lib/site';
+import { COPY, usePageTitle } from '../lib/site';
 
 function AuthShell({ title, subtitle, children }: { title: string; subtitle: ReactNode; children: ReactNode }) {
   return (
@@ -40,6 +40,7 @@ function useAfterAuth() {
 }
 
 export function Login() {
+  usePageTitle('登录');
   const { me } = useMe();
   const done = useAfterAuth();
   const [params] = useSearchParams();
@@ -94,6 +95,7 @@ export function Login() {
 }
 
 export function Register() {
+  usePageTitle('注册');
   const { me } = useMe();
   const config = useConfig();
   const done = useAfterAuth();

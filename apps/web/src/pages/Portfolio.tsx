@@ -9,6 +9,7 @@ import { BetsTable } from '../components/BetsTable';
 import { Button, Card, PageLoader, Segmented, Stat } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { formatDate, formatMoney, formatSigned } from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 const LEDGER_LABEL: Record<LedgerKind, string> = {
   signup: '注册奖励',
@@ -21,6 +22,7 @@ const LEDGER_LABEL: Record<LedgerKind, string> = {
   order_lock: '买单冻结资金',
   order_release: '订单解冻 / 价差退回',
   sell: '卖出份额',
+  buy: '买入份额',
   grant: '管理员调整',
 };
 
@@ -70,6 +72,7 @@ function Ledger() {
 }
 
 export default function PortfolioPage() {
+  usePageTitle('我的下注');
   const [tab, setTab] = useState<'active' | 'closed' | 'ledger'>('active');
   const qc = useQueryClient();
   const cancel = useMutation({

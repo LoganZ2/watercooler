@@ -1,3 +1,4 @@
+import type { PolymarketClient } from './mimic/client';
 import type { Context } from 'hono';
 import type { Config } from './config';
 import type { DB } from './db';
@@ -14,6 +15,8 @@ export interface AppDeps {
   runtime?: AppRuntime;
   /** Restarts the whole instance; absent when it is not run by the deploy's control script. */
   restart?: () => void;
+  /** Polymarket's public APIs for trading mirrors; the real ones unless a test passes a fake. */
+  polymarket?: PolymarketClient;
 }
 
 export interface AppEnv {

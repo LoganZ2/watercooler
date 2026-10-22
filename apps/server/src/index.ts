@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app';
 import { loadConfig, loadDotEnv } from './config';
 import { openDatabase } from './db';
+import { createPolymarketClient } from './mimic/client';
 import { controlScriptRestart, createRuntime } from './runtime';
 import { serveSpa } from './static';
 
@@ -9,9 +10,10 @@ loadDotEnv();
 const config = loadConfig();
 const db = openDatabase(config.databasePath);
 
-// AI bots and the WeCom bot follow the admin's feature flags and bot.json (see runtime.ts).
-const runtime = createRuntime({ db, config, now: Date.now });
-const app = createApp({ db, config, now: Date.now, runtime, restart: controlScriptRestart() });
+// AI bots, the WeCom bot and the Polymarket mirror follow the admin's feature flags (see runtime.ts).
+const polymarket = createPolymarketClient(config);
+const runtime = createRuntime({ db, config, now: Date.now, polymarket });
+const app = createApp({ db, config, now: Date.now, runtime, restart: controlScriptRestart(), polymarket });
 if (config.staticDir) serveSpa(app, config.staticDir);
 
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {

@@ -15,6 +15,7 @@ const FEATURE_LABEL: Record<Feature, string> = {
   aiBots: 'AI 机器人',
   wecom: '企业微信机器人',
   polymarket: 'Polymarket 模式',
+  mimic: 'Polymarket 镜像盘',
 };
 
 /** Features that also need credentials from bot.json. */
@@ -22,10 +23,11 @@ export type CredentialFeature = 'aiBots' | 'wecom';
 
 /**
  * The flags alone decide what should run; credentials never switch a feature on or off. With no
- * stored flag, Polymarket is on and the credential features are off (see seedFeatureFlags).
+ * stored flag, Polymarket and its mirror are on and the credential features are off (see
+ * seedFeatureFlags).
  */
 export function getFeatureFlags(db: DB): Record<Feature, boolean> {
-  const flags: Record<Feature, boolean> = { aiBots: false, wecom: false, polymarket: true };
+  const flags: Record<Feature, boolean> = { aiBots: false, wecom: false, polymarket: true, mimic: true };
   const rows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'feature.%'`).all() as {
     key: string;
     value: string;
@@ -52,6 +54,13 @@ export function seedFeatureFlags(
     (key) => insert.run(`feature.${key}`, configured[key] ? 'on' : 'off', now).changes > 0 && configured[key],
   );
 }
+
+/** Features that only run, and can only be switched on, while another one is on. */
+export const FEATURE_REQUIRES: Partial<Record<Feature, Feature>> = { mimic: 'polymarket' };
+
+/** Whether a feature is on and so is everything it needs. */
+export const featureOn = (flags: Record<Feature, boolean>, key: Feature): boolean =>
+  flags[key] && (FEATURE_REQUIRES[key] === undefined || featureOn(flags, FEATURE_REQUIRES[key]));
 
 export function setFeatureFlag(db: DB, adminId: number, key: Feature, enabled: boolean, now: number): void {
   db.transaction(() => {

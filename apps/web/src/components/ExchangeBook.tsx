@@ -80,7 +80,11 @@ export function ExchangeBook({
           <h2 className="font-semibold">
             订单簿{multi && ` · ${market.outcomes.find((o) => o.id === share.outcomeId)?.label}`}
           </h2>
-          <p className="mt-1 text-xs text-faint">抵押资金 {formatMoney(data.collateral)} 水滴 · 获胜每份兑回 1</p>
+          <p className="mt-1 text-xs text-faint">
+            {market.mimic
+              ? 'Polymarket 实时盘口 · 你的买卖不会影响它'
+              : `抵押资金 ${formatMoney(data.collateral)} 水滴 · 获胜每份兑回 1`}
+          </p>
         </div>
         <Segmented
           size="sm"
@@ -106,8 +110,9 @@ export function ExchangeBook({
         {bids.length ? rows(bids, false) : <p className="px-2 py-3 text-xs text-faint">暂无买单</p>}
       </div>
       <p className="text-xs leading-relaxed text-faint">
-        盘口已合并互补挂单：买 No @0.40 就是卖 Yes
-        @0.60，两边会直接撮合。点价格可填入限价单；与自己挂单交叉的新单会被拒绝。
+        {market.mimic
+          ? '来自 polymarket.com 的实时挂单，价格按对你不利的方向取整到 0.01、份数取整。在这里买卖不会吃掉这些挂单，也不会改变 Polymarket 的价格。'
+          : '盘口已合并互补挂单：买 No @0.40 就是卖 Yes @0.60，两边会直接撮合。点价格可填入限价单；与自己挂单交叉的新单会被拒绝。'}
       </p>
     </Card>
   );

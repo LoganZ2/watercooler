@@ -7,11 +7,13 @@ import {
   MAX_BET,
   MAX_OUTCOMES,
   MIN_BET,
+  mimicOrderSchema,
   orderSchema,
   payoutMultiplier,
   previewBet,
   toCents,
   type MarketSummary,
+  type MimicOrderInput,
   type OrderInput,
 } from '@watercooler/shared';
 import type { Config } from '../config';
@@ -20,13 +22,16 @@ import { HttpError } from '../lib/http';
 import { DAY, MINUTE } from '../lib/time';
 import { getUserStakes } from '../services/bets';
 import {
+  available,
   describeShare,
   exchangePortfolio,
   exchangePortfolioOrders,
   exchangeState,
   quoteOrder,
+  userPositions,
   winningHolders,
 } from '../services/exchange';
+import { mirrorShare } from '../services/mimic';
 import {
   derivedStatus,
   getMarketDetail,
@@ -138,6 +143,81 @@ const shareName = (ctx: ToolContext, marketId: number, s: { outcomeId: number; t
 
 const SIDE = { buy: '买入', sell: '卖出' } as const;
 
+/** A mirror share's best bid/ask on Polymarket as of the last sync (a No share's are the Yes ones flipped). */
+function mirrorQuotes(ctx: ToolContext, market: MarketRow, outcomeId: number, token: 'yes' | 'no') {
+  const s = mirrorShare(ctx.db, market, outcomeId, token);
+  const c = (v: number | null) => (v === null ? null : Math.round(v * 10) / 1000);
+  const bid = c(s.option.mimic_bid);
+  const ask = c(s.option.mimic_ask);
+  const flipped = s.token === 1;
+  return {
+    share: s,
+    label: s.label,
+    bid: flipped ? (ask === null ? null : money(1 - ask)) : bid,
+    ask: flipped ? (bid === null ? null : money(1 - bid)) : ask,
+    open: s.option.mimic_open === 1 && s.option.mimic_final === null,
+  };
+}
+
+/**
+ * A mirror market order on a card. The preview uses the last synced quote; the confirmed order
+ * trades Polymarket's live book, never past a worst price two cents beyond that quote.
+ */
+function proposeMirrorOrder(ctx: ToolContext, market: MarketRow, input: Input): string {
+  if (input.orderType === 'limit') throw new ToolError('镜像盘只能按 Polymarket 的实时价下市价单，不能挂限价单');
+  const outcome = findOutcome(getOutcomeRows(ctx.db, market.id), input.outcome);
+  const side = oneOf(input.side, ['buy', 'sell'] as const, 'buy');
+  const q = mirrorQuotes(ctx, market, outcome.id, input.share === 'no' ? 'no' : 'yes');
+  if (!q.open) throw new ToolError('这个选项在 Polymarket 上已经停止交易了');
+  const ref = side === 'buy' ? q.ask : q.bid;
+  if (ref === null || ref <= 0 || ref >= 1) throw new ToolError('Polymarket 上这个份额现在没有可成交的报价');
+  const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : Number(v));
+  const worst =
+    num(input.price) ??
+    Math.min(
+      0.99,
+      Math.max(0.01, side === 'buy' ? Math.ceil((ref + 0.02) * 100) / 100 : Math.floor((ref - 0.02) * 100) / 100),
+    );
+  const order: MimicOrderInput = {
+    outcomeId: q.share.outcome,
+    token: q.share.token === 1 ? 'no' : 'yes',
+    side,
+    type: input.fok ? 'FOK' : 'FAK',
+    price: worst,
+    ...(side === 'buy' && num(input.amount) !== undefined
+      ? { amount: num(input.amount) }
+      : { quantity: num(input.shares) }),
+  };
+  const parsed = mimicOrderSchema.safeParse(order);
+  if (!parsed.success) throw new ToolError(parsed.error.issues[0]?.message ?? '订单参数不对');
+  const balance = fromCents(getUserById(ctx.db, ctx.userId)!.balance);
+  if (side === 'buy' && (order.amount ?? ref * order.quantity!) > balance)
+    throw new ToolError(`余额不足：用户现在只有 ${balance} ${CURRENCY_NAME}`);
+  if (side === 'sell') {
+    const held = available(ctx.db, ctx.userId, q.share);
+    if (held < order.quantity!) throw new ToolError(`用户只有 ${held} 份「${q.label}」可卖`);
+  }
+  return propose(
+    ctx,
+    { kind: 'mimic_order', marketId: market.id, input: order },
+    {
+      title: `确认${SIDE[side]}「${q.label}」`,
+      desc: market.question,
+      rows: [
+        ['份额', q.label],
+        ['方向', `${SIDE[side]} · Polymarket 实时价`],
+        ['参考价', ref.toFixed(3)],
+        order.amount !== undefined
+          ? ['预计', `约 ${Math.floor(order.amount / ref)} 份，花 ${order.amount} ${CURRENCY_NAME}`]
+          : ['预计', `${order.quantity} 份，约 ${money(ref * order.quantity!)} ${CURRENCY_NAME}`],
+        ['最差价', worst.toFixed(2)],
+      ],
+      note: '确认时按 Polymarket 的实时盘口成交，对手是本站，不影响 Polymarket；比最差价更差的部分不成交。结果以 Polymarket 为准。',
+      url: marketUrl(ctx.siteUrl, market.id),
+    },
+  );
+}
+
 function propose(ctx: ToolContext, payload: ActionPayload, text: CardText): string {
   if (ctx.card) throw new ToolError('这条消息已经有一个待确认的操作了，一次只能确认一个，请让用户先处理那一个');
   const action = createAction(ctx.db, ctx.userId, ctx.wecomUserId, payload, ctx.now);
@@ -168,7 +248,11 @@ const tools: ToolDef[] = [
             enum: ['active', 'closed', 'resolved'],
             description: 'active 可下注；closed 已截止待公布；resolved 已公布或已取消',
           },
-          zone: { type: 'string', enum: ['human', 'ai', 'all'], description: 'human 大家建的盘；ai AI 专区' },
+          zone: {
+            type: 'string',
+            enum: ['human', 'ai', 'mimic', 'all'],
+            description: 'human 大家建的盘；ai AI 专区；mimic Polymarket 热门镜像盘（按 Polymarket 排名）',
+          },
           sort: { type: 'string', enum: ['trending', 'pot', 'new', 'closing'] },
           search: { type: 'string', description: '按问题关键词搜索' },
           limit: { type: 'integer', minimum: 1, maximum: 20 },
@@ -176,7 +260,8 @@ const tools: ToolDef[] = [
       },
     },
     run: (ctx, input) => {
-      const zone = input.zone === 'ai' ? 'ai' : input.zone === 'all' ? 'any' : 'human';
+      const zone =
+        input.zone === 'ai' ? 'ai' : input.zone === 'mimic' ? 'mimic' : input.zone === 'all' ? 'any' : 'human';
       const markets = listMarkets(ctx.db, ctx.now, {
         filter: oneOf<MarketFilter>(input.status, ['active', 'closed', 'resolved'], 'active'),
         zone,
@@ -200,6 +285,30 @@ const tools: ToolDef[] = [
     run: (ctx, input) => {
       const row = findMarket(ctx.db, input.marketId);
       const m = getMarketDetail(ctx.db, row.id, ctx.now);
+      if (row.mimic_id) {
+        const outcomes = getOutcomeRows(ctx.db, row.id);
+        const shares = row.neg_risk
+          ? outcomes.flatMap((o) => [mirrorQuotes(ctx, row, o.id, 'yes'), mirrorQuotes(ctx, row, o.id, 'no')])
+          : outcomes.map((o) => mirrorQuotes(ctx, row, o.id, 'yes'));
+        return {
+          ...compactMarket(ctx, m),
+          source: 'polymarket.com 镜像盘',
+          polymarketRank: m.mimic?.rank ?? null,
+          polymarketVolume24hUsd: Math.round(m.mimic?.volume24h ?? 0),
+          description: m.description.slice(0, 1500),
+          quotes: shares.map((q) => ({ share: q.label, bestBid: q.bid, bestAsk: q.ask, trading: q.open })),
+          myPositions: userPositions(ctx.db, m.id, ctx.userId)
+            .filter((p) => p.quantity > 0)
+            .map((p) => ({
+              share: mirrorShare(ctx.db, row, p.outcomeId, p.token).label,
+              shares: p.quantity,
+              avgPrice: p.avgPrice,
+            })),
+          trading:
+            '镜像 polymarket.com 的盘：按 Polymarket 的实时盘口买卖，对手是本站，交易不会影响 Polymarket；只能下市价单（place_order，orderType=market）。报价是最近一次同步的，确认时按实时盘口成交。结果以 Polymarket 为准，自动结算。',
+          url: marketUrl(ctx.siteUrl, m.id),
+        };
+      }
       if (m.mode === 'polymarket') {
         const state = exchangeState(ctx.db, m.id, ctx.now, ctx.userId);
         const name = (s: { outcomeId: number; token: 'yes' | 'no' }) => shareName(ctx, m.id, s);
@@ -432,6 +541,16 @@ const tools: ToolDef[] = [
     run: (ctx, input) => {
       const market = polymarket(ctx, input.marketId);
       const outcome = findOutcome(getOutcomeRows(ctx.db, market.id), input.outcome);
+      if (market.mimic_id) {
+        const q = mirrorQuotes(ctx, market, outcome.id, input.share === 'no' ? 'no' : 'yes');
+        return {
+          share: q.label,
+          bestBid: q.bid,
+          bestAsk: q.ask,
+          trading: q.open,
+          note: '镜像盘只给出 Polymarket 最近一次同步的买一卖一；完整的实时盘口请到网站看。',
+        };
+      }
       const share = describeShare(ctx.db, market.id, outcome.id, input.share === 'no' ? 'no' : 'yes');
       const book = exchangeState(ctx.db, market.id, ctx.now).books.find(
         (b) => b.outcomeId === share.outcomeId && b.token === share.token,
@@ -480,6 +599,7 @@ const tools: ToolDef[] = [
     run: (ctx, input) => {
       const market = polymarket(ctx, input.marketId);
       if (!isBettable(market, ctx.now)) throw new ToolError('这个市场已经停止交易了');
+      if (market.mimic_id) return proposeMirrorOrder(ctx, market, input);
       const outcome = findOutcome(getOutcomeRows(ctx.db, market.id), input.outcome);
       const side = oneOf(input.side, ['buy', 'sell'] as const, 'buy');
       const token = input.share === 'no' ? ('no' as const) : ('yes' as const);
@@ -793,4 +913,5 @@ export function runTool(ctx: ToolContext, name: string, input: unknown): { conte
 }
 
 export const RULES = `玩法一（奖池制）：每个选项一个奖池，押注进入所选选项的奖池；概率 = 该选项奖池占总奖池的比例。结果公布后，押中的人按押注比例分走整个奖池（包括押错的人的钱）；没人押中就全部退还。网站不抽成也不补贴。市场由创建者自己公布结果，只有奖池市场可主动取消。停止交易与结算时间分开设置：Polymarket 市场到结算时间后才能公布；奖池市场结果确定后随时可以公布，提前公布会立即停止下注；奖池模式在结算时间后 7 天未公布会自动取消并退款；Polymarket 市场不可取消，保留持仓和抵押资金等待结算，未成交订单仍可撤销。AI 专区的题由 AI 机器人出题和公布，人可以去押注。
+Polymarket 镜像盘：从 polymarket.com 同步的最热门的盘，用${CURRENCY_NAME}按 Polymarket 的实时盘口买卖份额（只有市价单），对手是本站，交易不影响 Polymarket 的价格；Polymarket 出结果后按它的结果自动兑付，每份获胜兑回 1。
 玩法二（Polymarket 份额）：每个是非题有 Yes、No 两种份额，多选题的每个选项各有一对 Yes / No；结果公布后获胜份额每份兑回 1，落败份额兑回 0。价格 0.01–0.99 就是大家认为的概率。份额在订单簿上买卖：市价单按盘口马上成交，限价单挂单等别人成交，可设到期时间；1 ${CURRENCY_NAME}可以拆成一对 Yes + No，也能合并换回。不收手续费。`;

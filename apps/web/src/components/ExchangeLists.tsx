@@ -1,11 +1,11 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { ExchangeState, MarketDetail } from '@watercooler/shared';
+import type { MarketDetail } from '@watercooler/shared';
 import clsx from 'clsx';
 import { Crown } from 'lucide-react';
 import { Link } from 'react-router';
 import { api } from '../lib/api';
 import { outcomeColor } from '../lib/colors';
-import { bookOf, formatPrice, isMultiExchange, shareName, sharePair, type ShareRef } from '../lib/exchange';
+import { formatPrice, isMultiExchange, shareName, sharePair, type ShareRef } from '../lib/exchange';
 import { formatMoney, formatPct, formatRelative } from '../lib/format';
 import { Avatar } from './Avatar';
 import { Button, Card, Empty, Spinner } from './ui';
@@ -13,12 +13,10 @@ import { Button, Card, Empty, Spinner } from './ui';
 /** Multi-outcome markets: every option with its chance and one-tap Yes / No buys, like a Polymarket event. */
 export function ExchangeOutcomes({
   market,
-  data,
   selected,
   onPick,
 }: {
   market: MarketDetail;
-  data: ExchangeState | undefined;
   selected: number;
   onPick: (share: ShareRef) => void;
 }) {
@@ -34,7 +32,8 @@ export function ExchangeOutcomes({
       {sorted.map((o) => {
         const c = outcomeColor(o.index, false);
         const [yes, no] = sharePair(market, o.id);
-        const ask = (s: ShareRef) => bookOf(data, s)?.asks[0]?.price;
+        // What buying costs now: the Yes ask, or for No one minus the Yes bid.
+        const ask = (s: ShareRef) => (s.token === 'no' ? (o.bestBid == null ? null : 1 - o.bestBid) : o.bestAsk);
         return (
           <div
             key={o.id}

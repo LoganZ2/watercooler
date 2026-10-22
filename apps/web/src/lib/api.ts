@@ -22,6 +22,8 @@ import type {
   ExchangeActivity,
   ExchangeHolder,
   OrderInput,
+  MimicOrderInput,
+  MimicTradeResult,
   WecomBinding,
   WecomBindRequest,
   AdminAuditEntry,
@@ -87,6 +89,7 @@ export const api = {
   admin: {
     overview: () => get<AdminOverview>('/admin/overview'),
     setFeature: (key: Feature, enabled: boolean) => post<AdminOverview>('/admin/features', { key, enabled }),
+    setMimicTopK: (topK: number) => post<AdminOverview>('/admin/mimic', { topK }),
     restart: () => post<{ ok: true }>('/admin/restart'),
     users: (q = '', limit?: number) => get<AdminUser[]>(`/admin/users${qs({ q, limit })}`),
     adjustBalance: (username: string, amount: number, reason: string) =>
@@ -119,11 +122,20 @@ export const api = {
   stats: () => get<SiteStats>('/stats'),
   activity: (limit = 30, zone?: 'ai') => get<Bet[]>(`/activity${qs({ limit, zone })}`),
   markets: (
-    p: { filter?: MarketFilter; sort?: MarketSort; category?: string; q?: string; limit?: number; zone?: 'ai' } = {},
+    p: {
+      filter?: MarketFilter;
+      sort?: MarketSort;
+      category?: string;
+      q?: string;
+      limit?: number;
+      zone?: 'ai' | 'mimic';
+    } = {},
   ) => get<MarketSummary[]>(`/markets${qs(p)}`),
   aiZone: () => get<AiZoneSummary>('/ai'),
   market: (id: number) => get<MarketDetailResponse>(`/markets/${id}`),
-  exchange: (id: number) => get<ExchangeState>(`/markets/${id}/exchange`),
+  /** Mirrors show the live Polymarket book of `outcome` (default: the first option). */
+  exchange: (id: number, outcome?: number) => get<ExchangeState>(`/markets/${id}/exchange${qs({ outcome })}`),
+  mimicOrder: (id: number, input: MimicOrderInput) => post<MimicTradeResult>(`/markets/${id}/mimic/order`, input),
   order: (id: number, input: OrderInput) => post<ExchangeOrder>(`/markets/${id}/orders`, input),
   cancelOrder: (id: number, orderId: number) => post(`/markets/${id}/orders/${orderId}/cancel`),
   splitMerge: (id: number, quantity: number, action: 'split' | 'merge', outcomeId?: number) =>

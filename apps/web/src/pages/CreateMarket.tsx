@@ -16,7 +16,7 @@ import { Button, Card, DateTimeInput, Field, Input, Textarea } from '../componen
 import { api, errorMessage } from '../lib/api';
 import { useConfig, useMe } from '../lib/auth';
 import { toLocalInput } from '../lib/format';
-import { COPY } from '../lib/site';
+import { COPY, usePageTitle } from '../lib/site';
 
 const QUICK_CLOSE = [
   { label: '明天', days: 1 },
@@ -26,6 +26,7 @@ const QUICK_CLOSE = [
 ];
 
 export default function CreateMarket() {
+  usePageTitle('创建预测');
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { me } = useMe();

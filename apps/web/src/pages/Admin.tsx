@@ -17,6 +17,7 @@ import { Badge, Button, Card, Empty, Field, Input, Modal, PageLoader, Segmented,
 import { api, errorMessage } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { formatDate, formatRelative } from '../lib/format';
+import { usePageTitle } from '../lib/site';
 
 type Tab = 'overview' | 'features' | 'config' | 'money' | 'admins' | 'audit';
 const TABS: { value: Tab; label: string }[] = [
@@ -38,12 +39,17 @@ const FEATURE_TEXT: Record<Feature, { title: string; hint: string }> = {
     title: 'Polymarket 模式',
     hint: '允许新建订单簿（Yes / No 份额）市场。关闭后已有的这类市场照常交易和结算。',
   },
+  mimic: {
+    title: 'Polymarket 镜像盘',
+    hint: '每 5 分钟从 polymarket.com 复制最热门的前 K 个事件，大家按它的实时盘口用水滴买卖（对手是本站，不影响 Polymarket），按它的结果自动结算。关闭后已有持仓照常结算。',
+  },
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Instance management. Every request behind it is checked for admin rights on the server too. */
 export default function AdminPage() {
+  usePageTitle('实例管理');
   const { me } = useMe();
   const [params, setParams] = useSearchParams();
   const tab = (TABS.some((t) => t.value === params.get('tab')) ? params.get('tab') : 'overview') as Tab;
@@ -93,7 +99,7 @@ export default function AdminPage() {
       </div>
       <div className="mt-6">
         {tab === 'overview' && <OverviewTab data={overview.data} />}
-        {tab === 'features' && <FeaturesTab features={overview.data.features} />}
+        {tab === 'features' && <FeaturesTab features={overview.data.features} topK={overview.data.mimicTopK} />}
         {tab === 'config' && <ConfigTab />}
         {tab === 'money' && <MoneyTab money={overview.data.money} />}
         {tab === 'admins' && <AdminsTab myId={me.id} />}
@@ -246,7 +252,7 @@ function Switch({
   );
 }
 
-function FeaturesTab({ features }: { features: FeatureState[] }) {
+function FeaturesTab({ features, topK }: { features: FeatureState[]; topK: number }) {
   const qc = useQueryClient();
   const toggle = useMutation({
     mutationFn: ({ key, enabled }: { key: Feature; enabled: boolean }) => api.admin.setFeature(key, enabled),
@@ -258,6 +264,8 @@ function FeaturesTab({ features }: { features: FeatureState[] }) {
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
+
+  const blocked = (f: FeatureState) => f.requires !== undefined && !features.find((x) => x.key === f.requires)?.enabled;
 
   return (
     <Card className="divide-y divide-line">
@@ -272,15 +280,20 @@ function FeaturesTab({ features }: { features: FeatureState[] }) {
             <p className="mt-1.5 text-xs">
               <FeatureStatus feature={f} />
             </p>
+            {f.enabled && f.status && <p className="mt-1 text-xs text-faint">{f.status}</p>}
             {!f.enabled && f.configured === false && (
               <p className="mt-1 text-xs text-faint">先在「配置」里填好并重启实例，才能打开。</p>
             )}
+            {!f.enabled && blocked(f) && (
+              <p className="mt-1 text-xs text-faint">先打开「{FEATURE_TEXT[f.requires!].title}」才能打开。</p>
+            )}
+            {f.key === 'mimic' && <MimicTopK topK={topK} />}
           </div>
           <Switch
             label={FEATURE_TEXT[f.key].title}
             checked={f.enabled}
-            // Without credentials a feature can only be switched off, never on.
-            disabled={toggle.isPending || (!f.enabled && f.configured === false)}
+            // Without credentials, or what it builds on, a feature can only be switched off, never on.
+            disabled={toggle.isPending || (!f.enabled && (f.configured === false || blocked(f)))}
             onChange={(enabled) => toggle.mutate({ key: f.key, enabled })}
           />
         </div>
@@ -289,6 +302,52 @@ function FeaturesTab({ features }: { features: FeatureState[] }) {
         开关立即生效，不用重启。AI 机器人和企业微信机器人要用到「配置」里的凭证，凭证改过后要重启实例才生效。
       </p>
     </Card>
+  );
+}
+
+function MimicTopK({ topK }: { topK: number }) {
+  const qc = useQueryClient();
+  const [value, setValue] = useState(String(topK));
+  const save = useMutation({
+    mutationFn: () => api.admin.setMimicTopK(Number(value)),
+    onSuccess: (data) => {
+      qc.setQueryData(['admin', 'overview'], data);
+      toast.success(`改为镜像前 ${data.mimicTopK} 个，马上同步一次`);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const n = Number(value);
+  return (
+    <form
+      className="mt-3 flex items-center gap-2 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+    >
+      <span className="shrink-0 whitespace-nowrap text-dim">镜像前</span>
+      <span className="w-20 shrink-0">
+        <Input
+          type="number"
+          min={1}
+          max={100}
+          className="h-8"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          aria-label="镜像前 K 个热门事件"
+        />
+      </span>
+      <span className="shrink-0 whitespace-nowrap text-dim">个热门事件</span>
+      <Button
+        type="submit"
+        size="sm"
+        variant="outline"
+        loading={save.isPending}
+        disabled={!Number.isInteger(n) || n < 1 || n > 100 || n === topK}
+      >
+        保存
+      </Button>
+    </form>
   );
 }
 

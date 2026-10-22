@@ -31,6 +31,9 @@ export interface Config {
   botConfigPath: string;
   /** The .env file loaded at startup; admins edit its site settings at /admin. */
   envFilePath: string;
+  /** Polymarket's public Gamma (markets) and CLOB (order books) APIs, for the mirror. */
+  polymarketGammaUrl: string;
+  polymarketClobUrl: string;
   /** Instance name and deployed release, set by the control script on the server. */
   instance: string;
   release: string | null;
@@ -81,6 +84,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     botConfigPath: env.BOT_CONFIG ? resolve(env.BOT_CONFIG) : resolve(REPO_ROOT, 'bot.json'),
     // On the server <release>/.env links to shared/.env (deploy/remote-deploy.sh).
     envFilePath: resolve(REPO_ROOT, '.env'),
+    // Polymarket's public APIs for the mirror; overridable to go through a proxy.
+    polymarketGammaUrl: (env.POLYMARKET_GAMMA_URL || 'https://gamma-api.polymarket.com').replace(/\/+$/, ''),
+    polymarketClobUrl: (env.POLYMARKET_CLOB_URL || 'https://clob.polymarket.com').replace(/\/+$/, ''),
     instance: env.INSTANCE?.trim() || 'local',
     release: env.RELEASE?.trim() || null,
   };

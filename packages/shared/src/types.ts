@@ -30,6 +30,8 @@ export interface AppConfig {
   aiZone: boolean;
   /** Whether the WeCom (企业微信) bot is connected, so accounts can be bound to it. */
   wecom: boolean;
+  /** Whether the Polymarket mirror (top markets copied from polymarket.com) is on. */
+  mimic: boolean;
   /** Whether new markets may use the Polymarket (order book) mode. */
   polymarket: boolean;
 }
@@ -74,6 +76,29 @@ export interface MarketSummary {
   outcomes: Outcome[];
   /** Recent probability of the first outcome (open binary markets only, else empty). */
   spark: number[];
+  /**
+   * Mirrors of polymarket.com markets: prices come from Polymarket and people trade against the
+   * site at those prices, so trades here never move them. Results follow Polymarket's.
+   */
+  mimic?: MimicInfo;
+}
+
+/** A filled Polymarket mirror order. */
+export interface MimicTradeResult {
+  side: 'buy' | 'sell';
+  label: string;
+  quantity: number;
+  total: number;
+  avgPrice: number;
+  balance: number;
+}
+
+export interface MimicInfo {
+  /** Place among Polymarket's busiest events right now, or null once it dropped out of the top K. */
+  rank: number | null;
+  /** Polymarket's 24h volume in USD. */
+  volume24h: number;
+  url: string;
 }
 
 export interface MarketDetail extends MarketSummary {
@@ -157,7 +182,8 @@ export type LedgerKind =
   | 'order_lock'
   | 'order_release'
   | 'sell'
-  | 'grant';
+  | 'grant'
+  | 'buy';
 
 export interface LedgerEntry {
   id: number;
@@ -343,7 +369,7 @@ export interface WecomBindRequest {
 }
 
 /** Instance features an admin can switch on and off while the site runs. */
-export const FEATURES = ['aiBots', 'wecom', 'polymarket'] as const;
+export const FEATURES = ['aiBots', 'wecom', 'polymarket', 'mimic'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export interface FeatureState {
@@ -355,6 +381,10 @@ export interface FeatureState {
   active: boolean;
   /** Why it is not active although enabled (missing config, failed to start, ...). */
   problem: string | null;
+  /** Another feature that has to be on before this one can be switched on. */
+  requires?: Feature;
+  /** A line about what it is doing, e.g. the last Polymarket sync. */
+  status?: string | null;
 }
 
 export interface AdminOverview {
@@ -366,6 +396,8 @@ export interface AdminOverview {
   /** Saved configuration differs from what this process started with. */
   restartNeeded: boolean;
   features: FeatureState[];
+  /** How many of Polymarket's busiest events the mirror copies. */
+  mimicTopK: number;
   money: {
     users: number;
     /** Spendable balances of people (not bots). */

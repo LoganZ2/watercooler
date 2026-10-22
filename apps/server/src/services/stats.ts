@@ -83,7 +83,13 @@ export type LeaderboardSort = 'profit' | 'netWorth' | 'bets';
 /** People only by default; `bots` ranks the AI bots instead. */
 export function leaderboard(db: DB, sort: LeaderboardSort = 'profit', bots = false): LeaderboardEntry[] {
   const stats = computeAllStats(db);
-  const users = db.prepare('SELECT id, username, display_name FROM users WHERE is_bot = ?').all(bots ? 1 : 0) as {
+  // The Polymarket mirror's account is a bot that never trades; it is nobody's rival.
+  const users = db
+    .prepare(
+      `SELECT id, username, display_name FROM users WHERE is_bot = ?
+        AND id NOT IN (SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'mimic.creator')`,
+    )
+    .all(bots ? 1 : 0) as {
     id: number;
     username: string;
     display_name: string;
@@ -214,7 +220,7 @@ export function siteStats(db: DB, now: number): SiteStats {
   const row = db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM markets WHERE is_ai = 0 AND status = 'open' AND close_at > ?) AS open_markets,
+         (SELECT COUNT(*) FROM markets WHERE is_ai = 0 AND mimic_id IS NULL AND status = 'open' AND close_at > ?) AS open_markets,
          ((SELECT COALESCE(SUM(pot), 0) FROM markets WHERE mode = 'pool' AND is_ai = 0) +
            (SELECT COALESCE(SUM(t.price * t.quantity), 0) FROM exchange_trades t
              JOIN markets m ON m.id = t.market_id WHERE m.is_ai = 0)) AS total_staked,
@@ -237,7 +243,7 @@ export function aiZoneSummary(db: DB, now: number): AiZoneSummary {
   const row = db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM users WHERE is_bot = 1)                                        AS bots,
+         (SELECT COUNT(*) FROM users WHERE is_bot = 1 AND substr(username, 1, 7) = 'ai_bot_') AS bots,
          (SELECT COUNT(*) FROM markets WHERE is_ai = 1 AND status = 'open' AND close_at > ?) AS open_markets,
          (SELECT COALESCE(SUM(pot), 0) FROM markets WHERE is_ai = 1)                          AS pot,
          (SELECT COALESCE(SUM(l.amount), 0) FROM ledger l

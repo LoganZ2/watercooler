@@ -197,6 +197,7 @@ function Navbar() {
         <nav className="hidden items-center md:flex">
           <NavItem to="/">市场</NavItem>
           {config?.aiZone && <NavItem to="/ai">AI 专区</NavItem>}
+          {config?.mimic && <NavItem to="/polymarket">Polymarket</NavItem>}
           <NavItem to="/leaderboard">排行榜</NavItem>
           {me && <NavItem to="/portfolio">我的下注</NavItem>}
         </nav>
@@ -354,6 +355,7 @@ function Footer() {
       links: [
         { to: '/', label: '全部市场' },
         ...(config?.aiZone ? [{ to: '/ai', label: 'AI 专区' }] : []),
+        ...(config?.mimic ? [{ to: '/polymarket', label: 'Polymarket 热门' }] : []),
         { to: '/?sort=closing', label: '即将截止' },
         { to: '/?status=resolved', label: '已结束' },
       ],

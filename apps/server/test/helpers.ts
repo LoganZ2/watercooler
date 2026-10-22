@@ -2,6 +2,7 @@ import { createApp } from '../src/app';
 import { loadConfig, type Config } from '../src/config';
 import type { AppDeps } from '../src/context';
 import { openDatabase } from '../src/db';
+import type { PolymarketBook, PolymarketClient, PolymarketEvent } from '../src/mimic/client';
 import type { AppRuntime } from '../src/runtime';
 
 /** Background services that are simply there (or not), for tests that don't exercise feature flags. */
@@ -56,4 +57,32 @@ export function setup(
   }
 
   return { db, config, clock, app, client, register };
+}
+
+/** A stand-in for polymarket.com: tests set the events and books it serves. */
+export function fakePolymarket(top: PolymarketEvent[] = []) {
+  const state = {
+    top,
+    /** Events looked up by id; defaults to the top list. */
+    events: new Map<string, PolymarketEvent>(),
+    books: new Map<string, PolymarketBook>(),
+    fail: false,
+    bookCalls: 0,
+  };
+  const client: PolymarketClient = {
+    async topEvents(limit) {
+      if (state.fail) throw new Error('network down');
+      return state.top.slice(0, limit);
+    },
+    async events(ids) {
+      if (state.fail) throw new Error('network down');
+      return ids.flatMap((id) => state.events.get(id) ?? state.top.find((e) => e.id === id) ?? []);
+    },
+    async book(token) {
+      state.bookCalls++;
+      if (state.fail) throw new Error('network down');
+      return state.books.get(token) ?? { bids: [], asks: [] };
+    },
+  };
+  return { client, state };
 }

@@ -128,6 +128,25 @@ export const orderSchema = orderObject.superRefine(orderRules);
 export const tradingOrderSchema = orderObject.extend({ marketId: z.number().int().positive() }).superRefine(orderRules);
 export type OrderInput = z.infer<typeof orderSchema>;
 
+/** Trade a Polymarket mirror at Polymarket's live prices: buy by amount or shares, sell shares. */
+export const mimicOrderSchema = z
+  .object({
+    outcomeId,
+    token: z.enum(TOKENS).optional(),
+    side: z.enum(['buy', 'sell']),
+    type: z.enum(['FOK', 'FAK']).optional(),
+    price: price.optional(),
+    quantity: shares.optional(),
+    amount: z.number().min(0.01).max(MAX_BET).refine(wholeCents, '金额精确到 0.01').optional(),
+  })
+  .superRefine((v, ctx) => {
+    if ((v.quantity === undefined) === (v.amount === undefined))
+      ctx.addIssue({ code: 'custom', message: '份数和金额要填且只填一个', path: ['quantity'] });
+    if (v.amount !== undefined && v.side !== 'buy')
+      ctx.addIssue({ code: 'custom', message: '按金额下单只能用于买入', path: ['amount'] });
+  });
+export type MimicOrderInput = z.infer<typeof mimicOrderSchema>;
+
 export const resolveMarketSchema = z.object({
   outcomeId: z.number().int(),
   note: z.string().trim().max(1000).optional(),
@@ -148,7 +167,7 @@ export const wecomBindSchema = z.object({
 const adminReason = z.string().trim().min(2, '请写明原因').max(200, '原因最多 200 字');
 
 export const adminFeatureSchema = z.object({
-  key: z.enum(['aiBots', 'wecom', 'polymarket']),
+  key: z.enum(['aiBots', 'wecom', 'polymarket', 'mimic']),
   enabled: z.boolean(),
 });
 
@@ -213,3 +232,6 @@ export const adminSiteConfigSchema = z.object({
   dailyBonus: z.number().min(0).max(MAX_BET, '金额过大'),
   timezone: z.string().trim().min(1, '请填写时区').refine(isTimeZone, '时区无效，例如 Asia/Shanghai'),
 });
+
+/** How many of Polymarket's busiest events the mirror copies. */
+export const adminMimicSchema = z.object({ topK: z.number().int().min(1, '至少 1 个').max(100, '最多 100 个') });

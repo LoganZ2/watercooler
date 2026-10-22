@@ -8,6 +8,14 @@ export const formatMoney = (n: number) => moneyFmt.format(n);
 /** 1.2万 for big numbers, 1,234 otherwise. */
 export const formatCompact = (n: number) => (Math.abs(n) >= 10_000 ? compactFmt.format(n) : intFmt.format(n));
 export const formatShares = (n: number) => sharesFmt.format(n);
+const usdFmt = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+/** Polymarket volumes, in real dollars: $2.9M. */
+export const formatUsd = (n: number) => usdFmt.format(n);
 
 /** Probability 0..1 as a whole percent, with <1% / >99% at the edges. */
 export function formatPct(p: number): string {
