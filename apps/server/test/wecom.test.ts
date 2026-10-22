@@ -471,10 +471,16 @@ describe('WeCom bot', () => {
     await fake.message('lisi', '@小助手 我的持仓', 'group2');
     const account = JSON.parse(toolResults(model.requests.at(-1)!)[0]!.content);
     expect(account.polymarketPositions).toContainEqual(
-      expect.objectContaining({ marketId: poly, outcome: 'Yes', shares: 10, reservedForSale: 2 }),
+      expect.objectContaining({ marketId: poly, share: 'Yes', shares: 10, reservedForSale: 2, avgPrice: 0.5 }),
     );
     expect(account.polymarketOpenOrders).toEqual([
-      { question: 'polymarket 下周会发年终奖吗？', outcome: 'Yes', side: '卖', price: 0.9, remaining: 2 },
+      expect.objectContaining({
+        question: 'polymarket 下周会发年终奖吗？',
+        share: 'Yes',
+        side: '卖出',
+        price: 0.9,
+        remaining: 2,
+      }),
     ]);
 
     // Before the settlement time a Polymarket card could only fail, so none is made.

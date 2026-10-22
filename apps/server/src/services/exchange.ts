@@ -104,6 +104,19 @@ function resolveShare(sh: Shares, outcomeId: number, token: Token = 'yes'): Shar
   return sh.multi ? { outcome: outcomeId, token: 1 } : complement(sh, yes);
 }
 
+/** An option + yes/no as the share it names (in binary markets "Yes, no" is the No option), with its label. */
+export function describeShare(db: DB, marketId: number, outcomeId: number, token: Token = 'yes') {
+  const sh = sharesOf(db, exchangeMarket(db, marketId));
+  const s = resolveShare(sh, outcomeId, token);
+  const o = sh.outcomes.find((x) => x.id === s.outcome)!;
+  return {
+    outcomeId: s.outcome,
+    token: tokenName(s.token),
+    label: shareLabel(o.label, s.token, sh.multi),
+    multi: sh.multi,
+  };
+}
+
 function exchangeMarket(db: DB, marketId: number, now?: number, userId?: number) {
   const m = getMarketRow(db, marketId);
   if (m.mode !== 'polymarket') throw badRequest('此市场不是 Polymarket 模式');
@@ -249,14 +262,7 @@ function releaseOrder(db: DB, o: OrderRow, now: number, note = `撤销订单 #${
  * Resting liquidity for one share, merged the way Polymarket shows it: `side` buy gives the bids
  * (buys of the share plus sells of its complement at 1 − p), sell gives the asks.
  */
-function levels(
-  db: DB,
-  sh: Shares,
-  s: Share,
-  side: 'buy' | 'sell',
-  now: number,
-  excludeUser = 0,
-): BookLevel[] {
+function levels(db: DB, sh: Shares, s: Share, side: 'buy' | 'sell', now: number, excludeUser = 0): BookLevel[] {
   const c = complement(sh, s);
   const rows = db
     .prepare(
@@ -396,6 +402,20 @@ export function placeOrder(db: DB, userId: number, marketId: number, input: Orde
     const c = complement(sh, s);
     if (type === 'GTD' && input.expiresAt! < now + MINUTE) throw badRequest('到期时间至少要在 1 分钟之后');
     const buy = input.side === 'buy';
+    let quantity = input.quantity ?? 0;
+    let escrow = limit * quantity;
+    // How far matching may go. FOK/FAK orders are planned against other people's orders first and
+    // never rest, so they only go as far as their fills (buys escrow exactly what those cost).
+    let reach = limit;
+    if (immediate) {
+      const book = levels(db, sh, s, buy ? 'sell' : 'buy', now, userId);
+      const plan = planFill(book, input.side, amount !== null ? { amount: amount / 100 } : { quantity }, limit / 100);
+      if (plan.quantity === 0) throw conflict('没有可成交的对手单，订单未执行');
+      if (type === 'FOK' && !plan.complete) throw conflict('对手单不足，FOK 订单不能全部成交，已取消');
+      if (amount !== null) quantity = plan.quantity;
+      escrow = Math.round(plan.total * 100);
+      reach = Math.round(plan.worstPrice! * 100);
+    }
     // The same crossing rule serves self-trade prevention and ordinary matching: the share's
     // opposite side, or the complement's same side at 1 − p.
     const findCrossingOrder = (own: boolean) =>
@@ -416,22 +436,11 @@ export function placeOrder(db: DB, userId: number, marketId: number, input: Orde
           co: c.outcome,
           ct: c.token,
           side: input.side,
-          price: limit,
+          price: reach,
         }) as OrderRow | undefined;
     const ownOrder = findCrossingOrder(true);
     if (ownOrder) throw conflict(`订单会与自己的挂单 #${ownOrder.id} 交叉，已拒绝；请先撤销旧单或调整价格`);
 
-    let quantity = input.quantity ?? 0;
-    // FOK/FAK orders are planned against the book first; buys escrow exactly what the fills cost.
-    let escrow = limit * quantity;
-    if (immediate) {
-      const book = levels(db, sh, s, buy ? 'sell' : 'buy', now, userId);
-      const plan = planFill(book, input.side, amount !== null ? { amount: amount / 100 } : { quantity }, limit / 100);
-      if (plan.quantity === 0) throw conflict('没有可成交的对手单，订单未执行');
-      if (type === 'FOK' && !plan.complete) throw conflict('对手单不足，FOK 订单不能全部成交，已取消');
-      if (amount !== null) quantity = plan.quantity;
-      escrow = Math.round(plan.total * 100);
-    }
     if (buy) {
       adjustBalance(db, userId, -escrow, 'order_lock', now, { marketId });
     } else {
@@ -477,7 +486,10 @@ export function placeOrder(db: DB, userId: number, marketId: number, input: Orde
       fillLeg(db, incoming, fill, fillPrice, now, immediate);
       spent += fillPrice * fill;
       if (kind !== 'transfer')
-        db.prepare('UPDATE markets SET pot = pot + ? WHERE id = ?').run((kind === 'mint' ? 100 : -100) * fill, marketId);
+        db.prepare('UPDATE markets SET pot = pot + ? WHERE id = ?').run(
+          (kind === 'mint' ? 100 : -100) * fill,
+          marketId,
+        );
       db.prepare(
         `INSERT INTO exchange_trades (market_id, outcome_id, token, maker_id, taker_id, price, quantity, kind, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -599,15 +611,13 @@ export function exchangeState(db: DB, marketId: number, now: number, userId?: nu
   }[];
   return {
     collateral: fromCents(sh.market.pot),
-    books: allShares(sh).map(
-      (s): ExchangeBook => ({
-        outcomeId: s.outcome,
-        token: tokenName(s.token),
-        bids: levels(db, sh, s, 'buy', now),
-        asks: levels(db, sh, s, 'sell', now),
-        lastPrice: lastPrice(sh, s) === null ? null : fromCents(lastPrice(sh, s)!),
-      }),
-    ),
+    books: allShares(sh).map((s): ExchangeBook => ({
+      outcomeId: s.outcome,
+      token: tokenName(s.token),
+      bids: levels(db, sh, s, 'buy', now),
+      asks: levels(db, sh, s, 'sell', now),
+      lastPrice: lastPrice(sh, s) === null ? null : fromCents(lastPrice(sh, s)!),
+    })),
     positions: userId
       ? (
           db

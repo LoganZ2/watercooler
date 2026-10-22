@@ -1,13 +1,5 @@
 import { z } from 'zod';
-import {
-  MAX_BET,
-  MAX_OUTCOMES,
-  MIN_BET,
-  MIN_MULTI_OUTCOMES,
-  MIN_OUTCOMES,
-  ORDER_TYPES,
-  TOKENS,
-} from './constants';
+import { MAX_BET, MAX_OUTCOMES, MIN_BET, MIN_MULTI_OUTCOMES, MIN_OUTCOMES, ORDER_TYPES, TOKENS } from './constants';
 
 const username = z
   .string()

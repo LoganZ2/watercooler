@@ -8,7 +8,7 @@ import { Money } from '../components/Money';
 import { BetsTable } from '../components/BetsTable';
 import { Button, Card, PageLoader, Segmented, Stat } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { formatDate, formatSigned } from '../lib/format';
+import { formatDate, formatMoney, formatSigned } from '../lib/format';
 
 const LEDGER_LABEL: Record<LedgerKind, string> = {
   signup: '注册奖励',
@@ -126,6 +126,7 @@ export default function PortfolioPage() {
                     #{o.id} {o.side === 'buy' ? '买' : '卖'} {o.outcomeLabel} @ {o.price.toFixed(2)} · 剩余{' '}
                     {o.remaining} 份 ·{' '}
                     {o.side === 'buy' ? `冻结 ${(o.price * o.remaining).toFixed(2)} 水滴` : `冻结 ${o.remaining} 份`}
+                    {o.expiresAt !== null && ` · ${formatDate(o.expiresAt)} 到期`}
                   </p>
                 </div>
                 <Button
@@ -147,20 +148,47 @@ export default function PortfolioPage() {
       )}
       {data.exchangePositions.length > 0 && (
         <Card className="mt-6 p-5">
-          <h2 className="font-semibold">Polymarket 份额</h2>
-          <p className="mt-1 text-xs text-faint">持有数量包含卖单冻结份额；已结算份额仅作历史记录，兑付见资金流水。</p>
-          <ul className="mt-3 divide-y divide-line">
-            {data.exchangePositions.map((p) => (
-              <li key={p.outcomeId} className="flex justify-between gap-3 py-3 text-sm">
-                <Link to={`/market/${p.marketId}`} className="min-w-0 truncate text-brand">
-                  {p.question} · {p.outcomeLabel}
-                </Link>
-                <span className="shrink-0 font-mono">
-                  {p.quantity} 份 · {p.status === 'open' || p.status === 'closed' ? `冻结 ${p.reserved}` : '已结算'}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <h2 className="font-semibold">Polymarket 持仓</h2>
+          <p className="mt-1 text-xs text-faint">
+            估值按当前显示价格计算，只供参考，不计入净值和排行；已结算的份额按 1 / 0 兑付，见资金流水。
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="text-left text-xs text-faint">
+                <tr>
+                  <th className="py-2 font-normal">市场 · 份额</th>
+                  <th className="py-2 text-right font-normal">份数</th>
+                  <th className="py-2 text-right font-normal">均价</th>
+                  <th className="py-2 text-right font-normal">现价</th>
+                  <th className="py-2 text-right font-normal">估值</th>
+                  <th className="py-2 text-right font-normal">盈亏</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {data.exchangePositions.map((p) => (
+                  <tr key={`${p.outcomeId}:${p.token}`}>
+                    <td className="max-w-64 py-3 pr-3">
+                      <Link to={`/market/${p.marketId}`} className="block truncate text-brand">
+                        {p.question}
+                      </Link>
+                      <span className="text-xs text-dim">
+                        {p.outcomeLabel}
+                        {p.status === 'resolved' && ' · 已结算'}
+                        {p.reserved > 0 && ` · 挂卖 ${p.reserved}`}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right font-mono">{p.quantity}</td>
+                    <td className="py-3 text-right font-mono">{p.avgPrice?.toFixed(2) ?? '—'}</td>
+                    <td className="py-3 text-right font-mono">{p.price.toFixed(2)}</td>
+                    <td className="py-3 text-right font-mono">{formatMoney(p.value)}</td>
+                    <td className={clsx('py-3 text-right font-mono', p.pnl >= 0 ? 'text-yes' : 'text-no')}>
+                      {formatSigned(p.pnl)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
       <Card className="mt-6 p-5">

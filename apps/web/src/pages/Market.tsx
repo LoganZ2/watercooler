@@ -7,8 +7,9 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Avatar } from '../components/Avatar';
 import { BetPanel } from '../components/BetPanel';
-import { ExchangePanel } from '../components/ExchangePanel';
+import { ExchangePanel, ExchangePositions, type TicketIntent } from '../components/ExchangePanel';
 import { ExchangeBook } from '../components/ExchangeBook';
+import { ExchangeActivityList, ExchangeHolders, ExchangeOutcomes } from '../components/ExchangeLists';
 import { CategoryIcon } from '../components/CategoryIcon';
 import { Money } from '../components/Money';
 import { StatusBadge } from '../components/StatusBadge';
@@ -16,6 +17,7 @@ import { Badge, Button, Card, Empty, Modal, PageLoader, Segmented, Spinner, Text
 import { api, errorMessage, type HistoryRange } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { outcomeColor } from '../lib/colors';
+import { isMultiExchange, type ShareRef } from '../lib/exchange';
 import { formatDate, formatMoney, formatMultiplier, formatPct, formatRelative, formatSigned } from '../lib/format';
 
 const PriceChart = lazy(() => import('../components/PriceChart'));
@@ -36,7 +38,9 @@ function ChartCard({ market }: { market: MarketDetail }) {
         {market.isBinary ? (
           <div className="flex items-end gap-3">
             <span className="font-mono text-5xl font-bold text-brand">{formatPct(lead.probability)}</span>
-            <span className="pb-2 text-sm text-dim">押「{lead.label}」占比</span>
+            <span className="pb-2 text-sm text-dim">
+              {market.mode === 'polymarket' ? `「${lead.label}」概率` : `押「${lead.label}」占比`}
+            </span>
             {lead.change24h !== null && Math.abs(lead.change24h) >= 0.001 && (
               <span className={clsx('pb-2 font-mono text-sm', lead.change24h > 0 ? 'text-yes' : 'text-no')}>
                 {lead.change24h > 0 ? '▲' : '▼'} {formatSigned(lead.change24h * 100, 1)}% 24h
@@ -488,15 +492,14 @@ export default function Market() {
   const id = Number(useParams().id);
   const [params, setParams] = useSearchParams();
   const { me } = useMe();
-  const [tab, setTab] = useState<'comments' | 'holders' | 'bets'>('comments');
+  const [tab, setTab] = useState<'comments' | 'holders' | 'bets' | 'activity'>('comments');
   const { data, isPending, error } = useQuery({
     queryKey: ['market', id],
     queryFn: () => api.market(id),
     refetchInterval: 10_000,
   });
-  const [outcomeId, setOutcomeId] = useState<number | null>(null);
-  const [side, setSide] = useState<'buy' | 'sell'>('buy');
-  const [price, setPrice] = useState('0.50');
+  const [picked, setPicked] = useState<ShareRef | null>(null);
+  const [intent, setIntent] = useState<TicketIntent | null>(null);
   const exchange = useQuery({
     queryKey: ['exchange', id, me?.id],
     queryFn: () => api.exchange(id),
@@ -505,29 +508,44 @@ export default function Market() {
   });
 
   useEffect(() => {
-    setSide('buy');
-    setPrice('0.50');
+    setIntent(null);
+    setTab('comments');
   }, [id]);
 
   useEffect(() => {
     const fromUrl = Number(params.get('outcome'));
-    if (fromUrl) setOutcomeId(fromUrl);
+    if (fromUrl) setPicked({ outcomeId: fromUrl, token: params.get('token') === 'no' ? 'no' : 'yes' });
   }, [params]);
 
   if (isPending) return <PageLoader />;
   if (error || !data) return <Empty title="市场不存在或已被删除" />;
   const { market, stakes } = data;
-  const selected = outcomeId && market.outcomes.some((o) => o.id === outcomeId) ? outcomeId : market.outcomes[0]!.id;
+  const share: ShareRef =
+    picked && market.outcomes.some((o) => o.id === picked.outcomeId)
+      ? { outcomeId: picked.outcomeId, token: isMultiExchange(market) ? picked.token : 'yes' }
+      : { outcomeId: market.outcomes[0]!.id, token: 'yes' };
+  const selected = share.outcomeId;
 
   const focusTrade = () => {
     if (window.innerWidth < 1024)
       document.getElementById('trade')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  const selectOutcome = (oid: number, scrollToTrade = true) => {
-    setOutcomeId(oid);
-    setParams((p) => (p.set('outcome', String(oid)), p), { replace: true, preventScrollReset: true });
+  const selectShare = (s: ShareRef, scrollToTrade = true) => {
+    setPicked(s);
+    setParams(
+      (p) => {
+        p.set('outcome', String(s.outcomeId));
+        if (s.token === 'no') p.set('token', 'no');
+        else p.delete('token');
+        return p;
+      },
+      { replace: true, preventScrollReset: true },
+    );
     if (scrollToTrade) focusTrade();
   };
+  const selectOutcome = (oid: number, scrollToTrade = true) =>
+    selectShare({ outcomeId: oid, token: 'yes' }, scrollToTrade);
+  const ticket = (next: Omit<TicketIntent, 'seq'>) => setIntent((prev) => ({ ...next, seq: (prev?.seq ?? 0) + 1 }));
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -566,38 +584,60 @@ export default function Market() {
           </div>
         </header>
         <ResolutionBanner market={market} />
+        <ChartCard market={market} />
         {market.mode === 'polymarket' ? (
-          <ExchangeBook
-            market={market}
-            data={exchange.data}
-            error={exchange.error}
-            outcomeId={selected}
-            onOutcomeChange={(oid) => selectOutcome(oid, false)}
-            onQuoteSelect={(nextSide, nextPrice) => {
-              setSide(nextSide);
-              setPrice(nextPrice);
-              focusTrade();
-            }}
-          />
+          <>
+            {!market.isBinary && (
+              <ExchangeOutcomes
+                market={market}
+                data={exchange.data}
+                selected={selected}
+                onPick={(s) => {
+                  selectShare(s);
+                  ticket({ side: 'buy', mode: 'market' });
+                }}
+              />
+            )}
+            <ExchangeBook
+              market={market}
+              data={exchange.data}
+              error={exchange.error}
+              share={share}
+              onShareChange={(s) => selectShare(s, false)}
+              onQuoteSelect={(side, price) => {
+                ticket({ side, mode: 'limit', price });
+                focusTrade();
+              }}
+            />
+          </>
         ) : (
-          <ChartCard market={market} />
+          !market.isBinary && <OutcomeTable market={market} selected={selected} onSelect={selectOutcome} />
         )}
-        {!market.isBinary && <OutcomeTable market={market} selected={selected} onSelect={selectOutcome} />}
       </div>
 
       <aside id="trade" className="scroll-mt-20 space-y-4 lg:sticky lg:top-24 lg:row-span-2 lg:self-start">
         {market.mode === 'polymarket' ? (
-          <ExchangePanel
-            key={market.id}
-            market={market}
-            data={exchange.data}
-            error={exchange.error}
-            outcomeId={selected}
-            side={side}
-            onSideChange={setSide}
-            price={price}
-            onPriceChange={setPrice}
-          />
+          <>
+            <ExchangePanel
+              key={market.id}
+              market={market}
+              data={exchange.data}
+              error={exchange.error}
+              share={share}
+              onShareChange={(s) => selectShare(s, false)}
+              intent={intent}
+            />
+            <ExchangePositions
+              key={`positions-${market.id}`}
+              market={market}
+              data={exchange.data}
+              onSell={(s, quantity) => {
+                selectShare(s, false);
+                ticket({ side: 'sell', mode: 'market', quantity: String(quantity) });
+                document.getElementById('trade')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
+          </>
         ) : (
           <>
             <BetPanel market={market} stakes={stakes} outcomeId={selected} onOutcomeChange={selectOutcome} />
@@ -642,31 +682,40 @@ export default function Market() {
         </Card>
 
         <Card className="p-5">
-          {market.mode === 'pool' ? (
-            <Segmented
-              variant="tabs"
-              value={tab}
-              onChange={setTab}
-              options={[
-                {
-                  value: 'comments',
-                  label: (
-                    <span className="inline-flex items-center gap-1.5">
-                      <MessageCircle className="size-3.5" /> 讨论 {market.commentCount > 0 && market.commentCount}
-                    </span>
-                  ),
-                },
-                { value: 'holders', label: '下注榜' },
-                { value: 'bets', label: '下注记录' },
-              ]}
-            />
-          ) : (
-            <h2 className="font-semibold">讨论</h2>
-          )}
+          <Segmented
+            variant="tabs"
+            value={tab}
+            onChange={setTab}
+            options={[
+              {
+                value: 'comments',
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MessageCircle className="size-3.5" /> 讨论 {market.commentCount > 0 && market.commentCount}
+                  </span>
+                ),
+              },
+              ...(market.mode === 'pool'
+                ? [
+                    { value: 'holders' as const, label: '下注榜' },
+                    { value: 'bets' as const, label: '下注记录' },
+                  ]
+                : [
+                    { value: 'holders' as const, label: '持有者' },
+                    { value: 'activity' as const, label: '成交动态' },
+                  ]),
+            ]}
+          />
           <div className="mt-5">
-            {(market.mode === 'polymarket' || tab === 'comments') && <Comments marketId={market.id} />}
-            {market.mode === 'pool' && tab === 'holders' && <Holders market={market} />}
-            {market.mode === 'pool' && tab === 'bets' && <BetHistory market={market} />}
+            {tab === 'comments' && <Comments marketId={market.id} />}
+            {tab === 'holders' &&
+              (market.mode === 'pool' ? (
+                <Holders market={market} />
+              ) : (
+                <ExchangeHolders market={market} outcomeId={selected} />
+              ))}
+            {tab === 'bets' && market.mode === 'pool' && <BetHistory market={market} />}
+            {tab === 'activity' && market.mode === 'polymarket' && <ExchangeActivityList market={market} />}
           </div>
         </Card>
       </div>

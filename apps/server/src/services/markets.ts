@@ -354,7 +354,9 @@ export function createMarket(
     const marketId = Number(lastInsertRowid);
     // Until anyone trades, every option of a multi-outcome market shows an even 1/N.
     const insertOutcome = db.prepare('INSERT INTO outcomes (market_id, idx, label, mark_price) VALUES (?, ?, ?, ?)');
-    input.outcomes.forEach((label, i) => insertOutcome.run(marketId, i, label, multi ? 100 / input.outcomes.length : 50));
+    input.outcomes.forEach((label, i) =>
+      insertOutcome.run(marketId, i, label, multi ? 100 / input.outcomes.length : 50),
+    );
     recordPriceSnapshot(db, marketId, poolShares(input.outcomes.map(() => 0)), now);
     return marketId;
   })();

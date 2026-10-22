@@ -102,7 +102,9 @@ describe('upstream and Polymarket database upgrades', () => {
       db.close();
       db = openDatabase(path);
       expect(
-        db.prepare('SELECT user_id,outcome_id,token,quantity,cost FROM exchange_positions ORDER BY user_id,outcome_id').all(),
+        db
+          .prepare('SELECT user_id,outcome_id,token,quantity,cost FROM exchange_positions ORDER BY user_id,outcome_id')
+          .all(),
       ).toEqual([
         { user_id: 1, outcome_id: 3, token: 0, quantity: 6, cost: 300 },
         { user_id: 1, outcome_id: 4, token: 0, quantity: 10, cost: 500 },

@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import type { CreateMarketInput } from '@watercooler/shared';
+import { fromCents, type CreateMarketInput, type OrderInput } from '@watercooler/shared';
 import type { DB } from '../db';
 import { conflict } from '../lib/http';
 import { MINUTE } from '../lib/time';
 import { cancelMarket, placeBet, resolveMarket } from '../services/bets';
+import { cancelOrder, placeOrder } from '../services/exchange';
 import { createMarket } from '../services/markets';
 import type { Card } from './transport';
 
@@ -14,7 +15,9 @@ export type ActionPayload =
   | { kind: 'bet'; marketId: number; outcomeId: number; amount: number }
   | { kind: 'create'; input: CreateMarketInput }
   | { kind: 'resolve'; marketId: number; outcomeId: number; note?: string }
-  | { kind: 'cancel'; marketId: number; note?: string };
+  | { kind: 'cancel'; marketId: number; note?: string }
+  | { kind: 'order'; marketId: number; input: OrderInput }
+  | { kind: 'cancel_order'; marketId: number; orderId: number };
 
 export interface ActionRow {
   id: number;
@@ -53,12 +56,35 @@ export function setActionStatus(db: DB, id: number, status: ActionRow['status'])
   db.prepare('UPDATE wecom_actions SET status = ? WHERE id = ?').run(status, id);
 }
 
+/** How an order went, for the card that replaces the confirmation. */
+function orderOutcome(db: DB, orderId: number): string {
+  const order = db.prepare('SELECT * FROM exchange_orders WHERE id = ?').get(orderId) as {
+    outcome_id: number;
+    token: number;
+    quantity: number;
+    remaining: number;
+    status: string;
+  };
+  const fills = db
+    .prepare(
+      `SELECT SUM(quantity) AS n, SUM(quantity * CASE WHEN outcome_id = ? AND token = ? THEN price ELSE 100 - price END) AS cost
+      FROM exchange_trades WHERE maker_id = ? OR taker_id = ?`,
+    )
+    .get(order.outcome_id, order.token, orderId, orderId) as { n: number | null; cost: number | null };
+  const filled = fills.n ?? 0;
+  const avg = filled ? `，均价 ${(fromCents(fills.cost!) / filled).toFixed(2)}` : '';
+  if (order.status === 'filled') return `全部成交 ${filled} 份${avg}`;
+  if (order.status === 'open')
+    return filled ? `成交 ${filled} 份${avg}，剩余 ${order.remaining} 份挂单中` : '已挂单，等待成交';
+  return `成交 ${filled} 份${avg}，其余已取消`;
+}
+
 /**
  * Carry out a confirmed action as its owner. The services re-check everything (market still open,
  * balance, creator), so a card that went stale fails with a readable error instead.
- * Returns the market the action touched.
+ * Returns the market the action touched and, for orders, how they filled.
  */
-export function executeAction(db: DB, action: ActionRow, now: number): number {
+export function executeAction(db: DB, action: ActionRow, now: number): { marketId: number; detail?: string } {
   return db.transaction(() => {
     const claimed = db
       .prepare(`UPDATE wecom_actions SET status = 'done' WHERE id = ? AND status = 'pending'`)
@@ -68,15 +94,22 @@ export function executeAction(db: DB, action: ActionRow, now: number): number {
     switch (p.kind) {
       case 'bet':
         placeBet(db, action.user_id, p.marketId, { outcomeId: p.outcomeId, amount: p.amount }, now);
-        return p.marketId;
+        return { marketId: p.marketId };
       case 'create':
-        return createMarket(db, action.user_id, p.input, now);
+        return { marketId: createMarket(db, action.user_id, p.input, now) };
       case 'resolve':
         resolveMarket(db, p.marketId, p.outcomeId, action.user_id, p.note, now);
-        return p.marketId;
+        return { marketId: p.marketId };
       case 'cancel':
         cancelMarket(db, p.marketId, action.user_id, p.note, now);
-        return p.marketId;
+        return { marketId: p.marketId };
+      case 'order': {
+        const order = placeOrder(db, action.user_id, p.marketId, p.input, now);
+        return { marketId: p.marketId, detail: orderOutcome(db, order.id) };
+      }
+      case 'cancel_order':
+        cancelOrder(db, action.user_id, p.marketId, p.orderId, now);
+        return { marketId: p.marketId, detail: '未成交部分已撤销，冻结的资金或份额已释放' };
     }
   })();
 }

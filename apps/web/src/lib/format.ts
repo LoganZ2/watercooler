@@ -64,3 +64,10 @@ export function formatDate(t: number): string {
   return new Date(t).getFullYear() === new Date().getFullYear() ? dateFmt.format(t) : fullDateFmt.format(t);
 }
 export const formatDay = (t: number) => dayFmt.format(t);
+
+/** A timestamp as the value of a <input type="datetime-local">, in the browser's time zone. */
+export function toLocalInput(t: number): string {
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

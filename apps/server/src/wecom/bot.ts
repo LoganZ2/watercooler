@@ -185,15 +185,17 @@ export function startWecom(deps: WecomDeps): WecomService {
       return;
     }
     try {
-      const marketId = executeAction(db, action, now);
+      const { marketId, detail } = executeAction(db, action, now);
       const url = marketUrl(siteUrl, marketId);
       const done = {
         bet: '✅ 下注成功',
         create: '✅ 开盘成功',
         resolve: '✅ 已公布结果并结算',
         cancel: '✅ 已取消市场',
+        order: '✅ 订单已提交',
+        cancel_order: '✅ 已撤单',
       }[action.kind];
-      await click.update(noticeCard(action.task_id, done, '点开查看市场', url));
+      await click.update(noticeCard(action.task_id, done, detail ?? '点开查看市场', url));
     } catch (err) {
       if (!(err instanceof HttpError)) log(`action ${action.id} failed: ${errorText(err)}`);
       if (getAction(db, action.id)?.status === 'pending') setActionStatus(db, action.id, 'failed');

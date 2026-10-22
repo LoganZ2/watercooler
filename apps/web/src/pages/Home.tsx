@@ -48,7 +48,7 @@ function FeaturedMarket({ market }: { market: MarketSummary }) {
           {market.question}
         </h2>
       </Link>
-      {market.mode === 'polymarket' ? (
+      {market.mode === 'polymarket' && market.isBinary ? (
         <div className="mt-5 flex-1">
           <p className="text-xs text-faint">挂单价 · 水滴/份</p>
           <div className="mt-3 grid gap-3">
@@ -68,7 +68,9 @@ function FeaturedMarket({ market }: { market: MarketSummary }) {
         <>
           <div className="mt-4 flex items-end gap-3">
             <span className="font-mono text-4xl font-bold text-brand">{formatPct(lead.probability)}</span>
-            <span className="pb-1 text-sm text-dim">押「{lead.label}」占比</span>
+            <span className="pb-1 text-sm text-dim">
+              {market.mode === 'polymarket' ? `「${lead.label}」概率` : `押「${lead.label}」占比`}
+            </span>
             {lead.change24h !== null && Math.abs(lead.change24h) >= 0.005 && (
               <span className={clsx('pb-1 font-mono text-sm', lead.change24h > 0 ? 'text-yes' : 'text-no')}>
                 {lead.change24h > 0 ? '▲' : '▼'} {formatSigned(lead.change24h * 100, 0)}%

@@ -27,17 +27,17 @@ export function MarketCard({ market, preview }: { market: MarketSummary; preview
         <h3 className="line-clamp-2 min-h-[2.75rem] flex-1 text-[15px] leading-snug font-semibold text-fg transition-colors group-hover:text-brand">
           {market.question}
         </h3>
-        {market.mode === 'pool' && market.isBinary && market.outcomes[0] && (
+        {market.isBinary && market.outcomes[0] && (
           <ProbabilityRing
             value={market.outcomes[0].probability}
             size={56}
-            label={yesNoLabels ? '押是' : market.outcomes[0].label.slice(0, 4)}
+            label={market.mode === 'polymarket' ? '概率' : yesNoLabels ? '押是' : market.outcomes[0].label.slice(0, 4)}
           />
         )}
       </div>
 
       <div className="mt-3 flex flex-1 flex-col justify-end">
-        {market.mode === 'polymarket' ? (
+        {market.mode === 'polymarket' && market.isBinary ? (
           <>
             <span className="mb-2 text-xs text-faint">挂单价 · 水滴/份</span>
             <div className="grid grid-cols-2 gap-2">

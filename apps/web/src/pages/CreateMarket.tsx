@@ -1,5 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CATEGORIES, createMarketSchema, MAX_OUTCOMES, type MarketSummary } from '@watercooler/shared';
+import {
+  CATEGORIES,
+  createMarketSchema,
+  MAX_OUTCOMES,
+  MIN_MULTI_OUTCOMES,
+  type MarketSummary,
+} from '@watercooler/shared';
 import clsx from 'clsx';
 import { Gavel, Plus, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
@@ -9,14 +15,8 @@ import { MarketCard } from '../components/MarketCard';
 import { Button, Card, DateTimeInput, Field, Input, Textarea } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useConfig, useMe } from '../lib/auth';
+import { toLocalInput } from '../lib/format';
 import { COPY } from '../lib/site';
-
-/** datetime-local value (local time) for a timestamp. */
-function toLocalInput(t: number): string {
-  const d = new Date(t);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 const QUICK_CLOSE = [
   { label: '明天', days: 1 },
@@ -41,11 +41,11 @@ export default function CreateMarket() {
   const [submitted, setSubmitted] = useState(false);
 
   const outcomes =
-    mode === 'polymarket'
-      ? ['Yes', 'No']
-      : kind === 'binary'
-        ? ['是', '否']
-        : options.map((o) => o.trim()).filter(Boolean);
+    kind === 'binary'
+      ? mode === 'polymarket'
+        ? ['Yes', 'No']
+        : ['是', '否']
+      : options.map((o) => o.trim()).filter(Boolean);
   const closeTs = new Date(closeAt).getTime();
   const settleTs = new Date(settleAt).getTime();
 
@@ -135,10 +135,7 @@ export default function CreateMarket() {
                   <button
                     key={value}
                     type="button"
-                    onClick={() => {
-                      setMode(value);
-                      if (value === 'polymarket') setKind('binary');
-                    }}
+                    onClick={() => setMode(value)}
                     className={clsx(
                       'rounded-lg border p-4 text-left',
                       mode === value ? 'border-brand bg-brand-light' : 'border-line',
@@ -181,34 +178,36 @@ export default function CreateMarket() {
             </div>
           </div>
 
-          {mode === 'pool' && (
-            <div>
-              <span className="text-sm font-medium text-dim">类型</span>
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                {(
-                  [
+          <div>
+            <span className="text-sm font-medium text-dim">类型</span>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              {(mode === 'polymarket'
+                ? ([
+                    ['binary', 'Yes / No', '一个订单簿，买 Yes 或买 No'],
+                    ['multi', '多选一', `${MIN_MULTI_OUTCOMES}–${MAX_OUTCOMES} 个选项，每个选项各有一对 Yes / No`],
+                  ] as const)
+                : ([
                     ['binary', '是 / 否', '经典二元问题'],
                     ['multi', '多选一', `2–${MAX_OUTCOMES} 个互斥选项`],
-                  ] as const
-                ).map(([value, title, hint]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setKind(value)}
-                    className={clsx(
-                      'rounded-lg border p-4 text-left transition',
-                      kind === value ? 'border-brand bg-brand-light' : 'border-line hover:border-brand',
-                    )}
-                  >
-                    <div className="font-semibold">{title}</div>
-                    <div className="mt-0.5 text-xs text-faint">{hint}</div>
-                  </button>
-                ))}
-              </div>
+                  ] as const)
+              ).map(([value, title, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setKind(value)}
+                  className={clsx(
+                    'rounded-lg border p-4 text-left transition',
+                    kind === value ? 'border-brand bg-brand-light' : 'border-line hover:border-brand',
+                  )}
+                >
+                  <div className="font-semibold">{title}</div>
+                  <div className="mt-0.5 text-xs text-faint">{hint}</div>
+                </button>
+              ))}
             </div>
-          )}
+          </div>
 
-          {mode === 'pool' && kind === 'multi' && (
+          {kind === 'multi' && (
             <div>
               <span className="text-sm font-medium text-dim">选项（只会有一个成真）</span>
               <div className="mt-2 space-y-2">
