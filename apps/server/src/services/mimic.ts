@@ -265,7 +265,7 @@ export function mirrorActivity(
   }));
 }
 
-/** Fetch the share's live book and trade it: what the market page and WeCom cards call. */
+/** Fetch the share's live book and trade it: what the market page calls. */
 export async function placeMirrorOrder(
   db: DB,
   client: PolymarketClient,

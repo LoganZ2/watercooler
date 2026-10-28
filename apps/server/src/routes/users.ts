@@ -1,4 +1,4 @@
-import type { AiZoneSummary, Portfolio, UserProfile } from '@watercooler/shared';
+import type { Portfolio, UserProfile } from '@watercooler/shared';
 import { Hono } from 'hono';
 import { requireUser, type AppDeps, type AppEnv } from '../context';
 import { notFound, parseId } from '../lib/http';
@@ -6,7 +6,6 @@ import { listBets } from '../services/bets';
 import { exchangePortfolio, exchangePortfolioOrders } from '../services/exchange';
 import { listMarkets } from '../services/markets';
 import {
-  aiZoneSummary,
   leaderboard,
   siteStats,
   userBets,
@@ -21,13 +20,7 @@ export function userRoutes({ db, now }: AppDeps) {
 
   app.get('/stats', (c) => c.json(siteStats(db, now())));
 
-  app.get('/activity', (c) =>
-    c.json(
-      listBets(db, { zone: c.req.query('zone') === 'ai' ? 'ai' : 'human', limit: Number(c.req.query('limit')) || 30 }),
-    ),
-  );
-
-  app.get('/ai', (c) => c.json<AiZoneSummary>(aiZoneSummary(db, now())));
+  app.get('/activity', (c) => c.json(listBets(db, { peopleOnly: true, limit: Number(c.req.query('limit')) || 30 })));
 
   app.get('/leaderboard', (c) => {
     const sort = c.req.query('sort');

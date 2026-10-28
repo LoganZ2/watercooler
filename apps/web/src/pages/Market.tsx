@@ -580,25 +580,10 @@ export default function Market() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-5">
         <Link
-          to={
-            market.werewolf
-              ? `/werewolf/${market.werewolf.gameId}`
-              : market.isAi
-                ? '/ai'
-                : market.mimic
-                  ? '/polymarket'
-                  : '/'
-          }
+          to={market.mimic ? '/polymarket' : '/'}
           className="inline-flex items-center gap-1 text-sm text-dim hover:text-fg"
         >
-          <ChevronLeft className="size-4" />{' '}
-          {market.werewolf
-            ? `AI 狼人杀第 ${market.werewolf.gameId} 局`
-            : market.isAi
-              ? 'AI 专区'
-              : market.mimic
-                ? 'Polymarket 热门'
-                : '全部市场'}
+          <ChevronLeft className="size-4" /> {market.mimic ? 'Polymarket 热门' : '全部市场'}
         </Link>
         <header className="flex items-start gap-4">
           <CategoryIcon category={market.category} size={60} className="hidden sm:inline-flex" />
@@ -608,8 +593,6 @@ export default function Market() {
               <Badge>
                 {market.mimic ? 'Polymarket 镜像' : market.mode === 'polymarket' ? 'Polymarket' : '奖池模式'}
               </Badge>
-              {market.isAi && <Badge className="bg-brand-light text-brand">AI 出题</Badge>}
-              {market.werewolf && <Badge className="bg-brand-light text-brand">AI 狼人杀</Badge>}
               <StatusBadge market={market} />
             </div>
             <h1 className="mt-2 text-2xl leading-tight font-semibold sm:text-[28px] sm:leading-[1.3]">
@@ -723,21 +706,6 @@ export default function Market() {
             <p className="mt-3 rounded bg-raised p-3 text-xs leading-relaxed text-dim">
               这是 polymarket.com 上的盘的镜像，规则和结果都以 Polymarket 为准（上面是它的英文规则原文）。大家在这里按
               Polymarket 的实时盘口用水滴买卖，交易不会影响 Polymarket 的价格；它结算后这里自动兑付。
-            </p>
-          )}
-          {market.werewolf && (
-            <p className="mt-3 rounded bg-raised p-3 text-xs leading-relaxed text-dim">
-              这是 AI 狼人杀第 {market.werewolf.gameId}{' '}
-              局的盘：场上人数到停止下注线时提前截止，结果由游戏自动结算，下面的时间只是上限。
-              <Link to={`/werewolf/${market.werewolf.gameId}`} className="ml-1 text-brand hover:underline">
-                去围观这局 →
-              </Link>
-            </p>
-          )}
-          {market.isAi && (
-            <p className="mt-3 rounded bg-raised p-3 text-xs leading-relaxed text-dim">
-              这道题是 AI
-              机器人联网找新闻出的，截止后由它再次联网核实并公布结果；查不到会过几个小时再查，题目有问题会取消并全额退款。
             </p>
           )}
           <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-faint sm:grid-cols-3">

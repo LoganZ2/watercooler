@@ -11,7 +11,7 @@ export interface AppDeps {
   config: Config;
   /** Injectable clock, for tests and seeding. */
   now: () => number;
-  /** AI bots and the WeCom bot, switched by feature flags; absent where nothing runs in the background. */
+  /** The Polymarket mirror and the feature flags; absent where nothing runs in the background. */
   runtime?: AppRuntime;
   /** Restarts the whole instance; absent when it is not run by the deploy's control script. */
   restart?: () => void;

@@ -27,8 +27,6 @@ export interface Config {
    * or "" at the site root. The proxy strips it before forwarding; we only need it to scope cookies.
    */
   basePath: string;
-  /** bot.json with the AI bots' model settings; bots stay off when the file is missing. */
-  botConfigPath: string;
   /** The .env file loaded at startup; admins edit its site settings at /admin. */
   envFilePath: string;
   /** Polymarket's public Gamma (markets) and CLOB (order books) APIs, for the mirror. */
@@ -81,7 +79,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     timezone: env.APP_TIMEZONE || 'Asia/Shanghai',
     staticDir,
     basePath: normalizeBasePath(env.BASE_PATH),
-    botConfigPath: env.BOT_CONFIG ? resolve(env.BOT_CONFIG) : resolve(REPO_ROOT, 'bot.json'),
     // On the server <release>/.env links to shared/.env (deploy/remote-deploy.sh).
     envFilePath: resolve(REPO_ROOT, '.env'),
     // Polymarket's public APIs for the mirror; overridable to go through a proxy.

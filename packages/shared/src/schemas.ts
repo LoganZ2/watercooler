@@ -1,15 +1,5 @@
 import { z } from 'zod';
-import {
-  MAX_BET,
-  MAX_OUTCOMES,
-  MIN_BET,
-  MIN_MULTI_OUTCOMES,
-  MIN_OUTCOMES,
-  ORDER_TYPES,
-  TOKENS,
-  WEREWOLF_MAX_PLAYERS,
-  WEREWOLF_MIN_PLAYERS,
-} from './constants';
+import { MAX_BET, MAX_OUTCOMES, MIN_BET, MIN_MULTI_OUTCOMES, MIN_OUTCOMES, ORDER_TYPES, TOKENS } from './constants';
 
 const username = z
   .string()
@@ -170,14 +160,10 @@ export const commentSchema = z.object({
   body: z.string().trim().min(1, '评论不能为空').max(1000, '评论最多 1000 字'),
 });
 
-export const wecomBindSchema = z.object({
-  token: z.string().trim().min(1, '绑定链接无效').max(200, '绑定链接无效'),
-});
-
 const adminReason = z.string().trim().min(2, '请写明原因').max(200, '原因最多 200 字');
 
 export const adminFeatureSchema = z.object({
-  key: z.enum(['aiBots', 'wecom', 'polymarket', 'mimic', 'werewolf']),
+  key: z.enum(['polymarket', 'mimic']),
   enabled: z.boolean(),
 });
 
@@ -198,27 +184,6 @@ export const adminGrantAllSchema = z.object({
 
 export const adminUserSchema = z.object({
   username: z.string().trim().min(1, '请输入用户名'),
-});
-
-/** A secret field: left empty, the saved value stays. */
-const secretInput = z.string().trim().max(500, '太长了').optional();
-
-export const adminAiConfigSchema = z.object({
-  endpoint: z.string().trim().url('endpoint 不是有效的网址'),
-  apiKey: secretInput,
-  model: z.string().trim().min(1, '请填写模型名').max(100),
-  bots: z.number().int('机器人数量要是整数').min(1, '至少 1 个机器人').max(500, '最多 500 个机器人'),
-  marketsPerDay: z.number().min(0).max(100, '每天最多出 100 道题'),
-  betsPerDay: z.number().min(0).max(5000, '每天最多 5000 注'),
-  flipProbability: z.number().min(0, '押反概率在 0 到 1 之间').max(1, '押反概率在 0 到 1 之间'),
-});
-
-export const adminWecomConfigSchema = z.object({
-  botId: z.string().trim().min(1, '请填写 Bot ID').max(200),
-  secret: secretInput,
-  siteUrl: z.string().trim().url('网站地址无效，例如 https://ky-z.com/watercooler'),
-  siteName: z.string().trim().min(1, '请填写网站名称').max(40),
-  messagesPerHour: z.number().int().min(1, '至少 1 次').max(1000, '最多 1000 次'),
 });
 
 const isTimeZone = (tz: string) => {
@@ -244,14 +209,4 @@ export const adminSiteConfigSchema = z.object({
 });
 
 /** How many of Polymarket's busiest events the mirror copies. */
-export const adminWerewolfConfigSchema = z.object({
-  players: z
-    .number()
-    .int('人数要是整数')
-    .min(WEREWOLF_MIN_PLAYERS, `至少 ${WEREWOLF_MIN_PLAYERS} 人`)
-    .max(WEREWOLF_MAX_PLAYERS, `最多 ${WEREWOLF_MAX_PLAYERS} 人`),
-  restMinutes: z.number().int('分钟数要是整数').min(1, '至少休息 1 分钟').max(120, '最多休息 120 分钟'),
-  model: z.string().trim().max(100),
-});
-
 export const adminMimicSchema = z.object({ topK: z.number().int().min(1, '至少 1 个').max(100, '最多 100 个') });

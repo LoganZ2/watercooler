@@ -37,7 +37,7 @@ export default function Profile() {
             </div>
           </div>
           {rank === null ? (
-            <span className="rounded bg-brand-light px-2.5 py-1 text-sm text-brand">AI 机器人 · 只在 AI 专区下注</span>
+            <span className="rounded bg-brand-light px-2.5 py-1 text-sm text-brand">机器人账号 · 不参与排名</span>
           ) : (
             <div className="text-right">
               <div className="text-xs text-faint">排名</div>

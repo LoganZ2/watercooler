@@ -30,6 +30,7 @@ export interface MarketRow {
   resolved_at: number | null;
   resolution_note: string | null;
   pot: number;
+  /** Made by the AI bots this site once had; kept out of the people's lists. */
   is_ai: 0 | 1;
   /** Polymarket with 3+ options: each option has its own Yes/No book (see services/exchange). */
   neg_risk: 0 | 1;
@@ -38,9 +39,6 @@ export interface MarketRow {
   mimic_slug: string | null;
   mimic_rank: number | null;
   mimic_volume: number;
-  /** AI werewolf bets (werewolf/game.ts): the game, and the seat for "is this player out" markets. */
-  werewolf_game_id: number | null;
-  werewolf_seat: number | null;
   ai_checked_at: number | null;
   created_at: number;
 }
@@ -178,7 +176,6 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
       status: derivedStatus(r, now),
       // Multi-outcome Polymarket markets stay multi with two options (each option is its own Yes/No).
       isBinary: outcomes.length === 2 && !r.neg_risk,
-      isAi: r.is_ai === 1,
       pot: fromCents(r.pot),
       closeAt: r.close_at,
       settleAt: r.settle_at,
@@ -198,7 +195,6 @@ function hydrate(db: DB, rows: MarketListRow[], now: number): MarketSummary[] {
             },
           }
         : {}),
-      ...(r.werewolf_game_id !== null ? { werewolf: { gameId: r.werewolf_game_id, seat: r.werewolf_seat } } : {}),
     };
   });
 }
@@ -261,11 +257,8 @@ function sparklines(
 
 export type MarketFilter = 'active' | 'closed' | 'resolved' | 'all';
 export type MarketSort = 'trending' | 'pot' | 'new' | 'closing';
-/**
- * People's markets, the AI zone, the Polymarket mirror, or the AI werewolf games. `any` is all of
- * them but the werewolf games', which are only ever listed with their game.
- */
-export type MarketZone = 'human' | 'ai' | 'mimic' | 'werewolf' | 'any';
+/** People's markets, the Polymarket mirror, or all of them. */
+export type MarketZone = 'human' | 'mimic' | 'any';
 
 export interface ListMarketsOptions {
   mode?: 'pool' | 'polymarket';
@@ -298,10 +291,7 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
     case 'all':
       break;
   }
-  if (opts.zone === 'human') where.push('m.is_ai = 0 AND m.mimic_id IS NULL AND m.werewolf_game_id IS NULL');
-  if (opts.zone === 'ai') where.push('m.is_ai = 1');
-  if (opts.zone === 'werewolf') where.push('m.werewolf_game_id IS NOT NULL');
-  if (opts.zone === 'any') where.push('m.werewolf_game_id IS NULL');
+  if (opts.zone === 'human') where.push('m.is_ai = 0 AND m.mimic_id IS NULL');
   // Open mirrors are listed while they are in Polymarket's current top K.
   if (opts.zone === 'mimic')
     where.push(
@@ -336,14 +326,6 @@ export function listMarkets(db: DB, now: number, opts: ListMarketsOptions = {}):
   return hydrate(db, rows, now);
 }
 
-/** A werewolf game's markets: the winning side first, then one per seat. */
-export function werewolfMarkets(db: DB, gameId: number, now: number): MarketSummary[] {
-  const rows = db
-    .prepare(`${LIST_SELECT} WHERE m.werewolf_game_id = @game ORDER BY m.werewolf_seat IS NOT NULL, m.werewolf_seat`)
-    .all({ game: gameId, since: now - DAY }) as MarketListRow[];
-  return hydrate(db, rows, now);
-}
-
 export function getMarketSummary(db: DB, id: number, now: number): MarketSummary {
   const row = db.prepare(`${LIST_SELECT} WHERE m.id = @id`).get({ id, since: now - DAY }) as MarketListRow | undefined;
   if (!row) throw notFound('市场不存在');
@@ -371,13 +353,7 @@ export function recordPriceSnapshot(db: DB, marketId: number, probs: number[], n
   );
 }
 
-export function createMarket(
-  db: DB,
-  creatorId: number,
-  input: CreateMarketInput,
-  now: number,
-  opts: { ai?: boolean } = {},
-): number {
+export function createMarket(db: DB, creatorId: number, input: CreateMarketInput, now: number): number {
   if (!createMarketSchema.safeParse(input).success) throw badRequest('市场配置无效');
   if (input.closeAt <= now + 5 * MINUTE) throw badRequest('截止时间至少要在 5 分钟之后');
   if (input.closeAt > now + 5 * 365 * DAY) throw badRequest('截止时间不能超过 5 年');
@@ -387,8 +363,8 @@ export function createMarket(
   return db.transaction(() => {
     const { lastInsertRowid } = db
       .prepare(
-        `INSERT INTO markets (question, description, category, creator_id, close_at, created_at, mode, settle_at, is_ai, neg_risk)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO markets (question, description, category, creator_id, close_at, created_at, mode, settle_at, neg_risk)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.question,
@@ -399,7 +375,6 @@ export function createMarket(
         now,
         input.mode ?? 'pool',
         settleAt,
-        opts.ai ? 1 : 0,
         multi ? 1 : 0,
       );
     const marketId = Number(lastInsertRowid);
@@ -411,10 +386,6 @@ export function createMarket(
     recordPriceSnapshot(db, marketId, poolShares(input.outcomes.map(() => 0)), now);
     return marketId;
   })();
-}
-
-export function aiMarketsExist(db: DB): boolean {
-  return db.prepare('SELECT 1 FROM markets WHERE is_ai = 1 LIMIT 1').get() !== undefined;
 }
 
 export type HistoryRange = '1d' | '1w' | '1m' | 'all';

@@ -12,29 +12,13 @@ import { badRequest, notFound } from '../lib/http';
 import { adjustBalance, getUserByUsername, toUserRef, type UserRow } from './users';
 
 const FEATURE_LABEL: Record<Feature, string> = {
-  aiBots: 'AI 机器人',
-  wecom: '企业微信机器人',
   polymarket: 'Polymarket 模式',
   mimic: 'Polymarket 镜像盘',
-  werewolf: 'AI 狼人杀',
 };
 
-/** Features that also need credentials from bot.json. */
-export type CredentialFeature = 'aiBots' | 'wecom';
-
-/**
- * The flags alone decide what should run; credentials never switch a feature on or off. With no
- * stored flag, Polymarket and its mirror are on and the features that need bot.json are off (see
- * seedFeatureFlags for the bots and WeCom).
- */
+/** The flags alone decide what runs. With no stored flag, Polymarket and its mirror are on. */
 export function getFeatureFlags(db: DB): Record<Feature, boolean> {
-  const flags: Record<Feature, boolean> = {
-    aiBots: false,
-    wecom: false,
-    polymarket: true,
-    mimic: true,
-    werewolf: false,
-  };
+  const flags: Record<Feature, boolean> = { polymarket: true, mimic: true };
   const rows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'feature.%'`).all() as {
     key: string;
     value: string;
@@ -44,22 +28,6 @@ export function getFeatureFlags(db: DB): Record<Feature, boolean> {
     if (FEATURES.includes(key)) flags[key] = r.value === 'on';
   }
   return flags;
-}
-
-/**
- * One-time move from the old rule (a feature ran whenever bot.json had its credentials) to
- * explicit flags: a credential feature with no stored flag yet starts out on exactly when its
- * credentials are there. Stored flags are never touched. Returns the features switched on.
- */
-export function seedFeatureFlags(
-  db: DB,
-  configured: Record<CredentialFeature, boolean>,
-  now: number,
-): CredentialFeature[] {
-  const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)');
-  return (Object.keys(configured) as CredentialFeature[]).filter(
-    (key) => insert.run(`feature.${key}`, configured[key] ? 'on' : 'off', now).changes > 0 && configured[key],
-  );
 }
 
 /** Features that only run, and can only be switched on, while another one is on. */

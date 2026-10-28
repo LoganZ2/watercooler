@@ -14,11 +14,9 @@ import { RateLimiter } from '../lib/rateLimit';
 import { endSession, revokeSessions, startSession } from '../lib/session';
 import { MINUTE } from '../lib/time';
 import { featureOn, getFeatureFlags } from '../services/admin';
-import { aiMarketsExist } from '../services/markets';
 import { claimDailyBonus, createUser, getUserById, getUserByUsername, toMe } from '../services/users';
-import { gamesExist } from '../werewolf/game';
 
-export function authRoutes({ db, config, now, runtime }: AppDeps) {
+export function authRoutes({ db, config, now }: AppDeps) {
   const app = new Hono<AppEnv>();
   const loginFailures = new RateLimiter(10, 15 * MINUTE);
   const registrations = new RateLimiter(20, 60 * MINUTE);
@@ -31,11 +29,8 @@ export function authRoutes({ db, config, now, runtime }: AppDeps) {
       startingBalance: config.startingBalance,
       dailyBonus: config.dailyBonus,
       privateMode: config.privateMode,
-      aiZone: Boolean(runtime?.botsRunning()) || aiMarketsExist(db) || flags.werewolf || gamesExist(db),
-      wecom: runtime?.wecom() !== undefined,
       polymarket: flags.polymarket,
       mimic: featureOn(flags, 'mimic'),
-      werewolf: flags.werewolf,
     });
   });
 

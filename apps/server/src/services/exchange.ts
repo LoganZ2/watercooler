@@ -124,9 +124,9 @@ function exchangeMarket(db: DB, marketId: number, now?: number, userId?: number)
   if (now !== undefined && m.mimic_id)
     throw badRequest('Polymarket 镜像盘按 Polymarket 的实时报价买卖，不能挂单或拆分');
   if (now !== undefined && !isBettable(m, now)) throw conflict('交易已截止');
-  if (userId !== undefined && !m.is_ai) {
+  if (userId !== undefined) {
     const user = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(userId) as { is_bot: number } | undefined;
-    if (user?.is_bot) throw forbidden('机器人只能在 AI 专区交易');
+    if (user?.is_bot) throw forbidden('机器人账号不能交易');
   }
   return m;
 }

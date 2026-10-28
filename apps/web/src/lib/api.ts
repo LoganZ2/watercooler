@@ -1,5 +1,4 @@
 import type {
-  AiZoneSummary,
   AppConfig,
   Bet,
   BetInput,
@@ -24,17 +23,12 @@ import type {
   OrderInput,
   MimicOrderInput,
   MimicTradeResult,
-  WecomBinding,
-  WecomBindRequest,
   AdminAuditEntry,
   AdminInstanceConfig,
   AdminOverview,
   AdminSiteConfig,
   AdminUser,
-  AdminWerewolfConfig,
   Feature,
-  WerewolfGame,
-  WerewolfLobby,
 } from '@watercooler/shared';
 
 export class ApiError extends Error {
@@ -84,10 +78,6 @@ export const api = {
   changePassword: (oldPassword: string, newPassword: string) => post('/auth/password', { oldPassword, newPassword }),
   updateProfile: (displayName: string) => post<{ user: Me }>('/me/profile', { displayName }),
   claimBonus: () => post<{ balance: number; amount: number }>('/me/bonus'),
-  wecomBinding: () => get<{ binding: WecomBinding | null }>('/me/wecom'),
-  wecomBindRequest: (token: string) => get<WecomBindRequest>(`/wecom/bind/${encodeURIComponent(token)}`),
-  wecomBind: (token: string) => post<WecomBinding>('/wecom/bind', { token }),
-  wecomUnbind: () => post<{ ok: true }>('/me/wecom/unbind'),
 
   admin: {
     overview: () => get<AdminOverview>('/admin/overview'),
@@ -102,29 +92,11 @@ export const api = {
     removeAdmin: (username: string) => post<AdminUser>('/admin/admins/remove', { username }),
     audit: (before?: number) => get<AdminAuditEntry[]>(`/admin/audit${qs({ before })}`),
     config: () => get<AdminInstanceConfig>('/admin/config'),
-    saveAi: (input: {
-      endpoint: string;
-      apiKey?: string;
-      model: string;
-      bots: number;
-      marketsPerDay: number;
-      betsPerDay: number;
-      flipProbability: number;
-    }) => post<AdminInstanceConfig>('/admin/config/ai', input),
-    saveWecom: (input: {
-      botId: string;
-      secret?: string;
-      siteUrl: string;
-      siteName: string;
-      messagesPerHour: number;
-    }) => post<AdminInstanceConfig>('/admin/config/wecom', input),
-    removeWecom: () => post<AdminInstanceConfig>('/admin/config/wecom/remove'),
-    saveWerewolf: (input: AdminWerewolfConfig) => post<AdminInstanceConfig>('/admin/config/werewolf', input),
     saveSite: (input: AdminSiteConfig) => post<AdminInstanceConfig>('/admin/config/site', input),
   },
 
   stats: () => get<SiteStats>('/stats'),
-  activity: (limit = 30, zone?: 'ai') => get<Bet[]>(`/activity${qs({ limit, zone })}`),
+  activity: (limit = 30) => get<Bet[]>(`/activity${qs({ limit })}`),
   markets: (
     p: {
       filter?: MarketFilter;
@@ -132,12 +104,9 @@ export const api = {
       category?: string;
       q?: string;
       limit?: number;
-      zone?: 'ai' | 'mimic';
+      zone?: 'mimic';
     } = {},
   ) => get<MarketSummary[]>(`/markets${qs(p)}`),
-  aiZone: () => get<AiZoneSummary>('/ai'),
-  werewolf: () => get<WerewolfLobby>('/werewolf'),
-  werewolfGame: (id: number) => get<WerewolfGame>(`/werewolf/${id}`),
   market: (id: number) => get<MarketDetailResponse>(`/markets/${id}`),
   /** Mirrors show the live Polymarket book of `outcome` (default: the first option). */
   exchange: (id: number, outcome?: number) => get<ExchangeState>(`/markets/${id}/exchange${qs({ outcome })}`),

@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseEvent, type PolymarketEvent, type PolymarketMarket } from '../src/mimic/client';
 import { syncMimic } from '../src/mimic/sync';
-import { executeMirrorAction, type ActionRow } from '../src/wecom/actions';
-import { runTool, type ToolContext } from '../src/wecom/tools';
 import { leaderboard } from '../src/services/stats';
 import { toLevels } from '../src/services/mimic';
 import { fakePolymarket, setup } from './helpers';
@@ -104,9 +102,9 @@ describe('Polymarket mirror', () => {
     ]);
     expect(rain.mimic.url).toBe('https://polymarket.com/event/rain-in-la');
     expect((await e.alice.get('/markets')).body).toEqual([]);
-    // The mirror's account is a bot that is neither an AI bot nor anyone's rival.
+    // The mirror's account is a bot that is nobody's rival.
     expect(nba.creator.displayName).toBe('Polymarket');
-    expect(leaderboard(e.db, 'profit', true)).toEqual([]);
+    expect(leaderboard(e.db, 'profit').map((x) => x.user.displayName)).not.toContain('Polymarket');
 
     // Dropping out of the top K unlists a mirror but keeps it; a second pass reuses the rows.
     e.fake.state.top = [e.binary];
@@ -231,68 +229,6 @@ describe('Polymarket mirror', () => {
     expect((await e.alice.post('/admin/mimic', { topK: 0 })).status).toBe(400);
     expect((await e.alice.post('/admin/mimic', { topK: 20 })).body.mimicTopK).toBe(20);
     expect((await e.alice.get('/admin/audit')).body[0].detail).toContain('前 20 个');
-  });
-});
-
-describe('Polymarket mirror on WeCom', () => {
-  it('lists mirrors, quotes the last sync on a card and fills at the live book when confirmed', async () => {
-    const e = await fixture();
-    await e.sync();
-    const userId = (e.db.prepare(`SELECT id FROM users WHERE username = 'alice'`).get() as { id: number }).id;
-    const ctx = (): ToolContext => ({
-      db: e.db,
-      config: e.config,
-      now: e.clock.now,
-      siteUrl: 'https://example.invalid',
-      userId,
-      wecomUserId: 'wc-alice',
-      card: null,
-    });
-    const listed = JSON.parse(runTool(ctx(), 'list_markets', { zone: 'mimic' }).content);
-    expect(listed.map((m: any) => m.question)).toEqual(['NBA Champion 2027', 'Will it rain in LA tomorrow?']);
-    const nba = listed[0].id;
-    const detail = JSON.parse(runTool(ctx(), 'get_market', { marketId: nba }).content);
-    expect(detail.quotes.slice(0, 2)).toEqual([
-      { share: 'celtics · Yes', bestBid: 0.49, bestAsk: 0.51, trading: true },
-      { share: 'celtics · No', bestBid: 0.49, bestAsk: 0.51, trading: true },
-    ]);
-    expect(
-      runTool(ctx(), 'place_order', {
-        marketId: nba,
-        outcome: 'celtics',
-        side: 'buy',
-        orderType: 'limit',
-        price: 0.5,
-        shares: 5,
-      }).isError,
-    ).toBe(true);
-
-    const card = ctx();
-    const quoted = runTool(card, 'place_order', {
-      marketId: nba,
-      outcome: 'lakers',
-      share: 'no',
-      side: 'buy',
-      orderType: 'market',
-      amount: 7,
-    });
-    expect(quoted.isError).toBe(false);
-    const action = e.db.prepare('SELECT * FROM wecom_actions ORDER BY id DESC').get() as ActionRow;
-    expect(action.kind).toBe('mimic_order');
-    // Reference: 1 − 0.29 = 0.71; never more than two cents above it.
-    expect(JSON.parse(action.payload).input).toMatchObject({ token: 'no', amount: 7, price: 0.73 });
-    expect(JSON.stringify(card.card)).toContain('约 9 份');
-
-    e.fake.state.books.set('lakers-no', {
-      asks: [
-        { price: 0.72, size: 5 },
-        { price: 0.75, size: 50 },
-      ],
-      bids: [],
-    });
-    const done = await executeMirrorAction(e.db, e.fake.client, action, () => e.clock.now);
-    expect(done.detail).toBe('买入 5 份，均价 0.720，花了 3.6');
-    await expect(executeMirrorAction(e.db, e.fake.client, action, () => e.clock.now)).rejects.toThrow('已经处理过');
   });
 });
 

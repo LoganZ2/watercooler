@@ -1,8 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CURRENCY_NAME,
-  WEREWOLF_MAX_PLAYERS,
-  WEREWOLF_MIN_PLAYERS,
   type AdminInstanceConfig,
   type AdminOverview,
   type Feature,
@@ -32,18 +30,9 @@ const TABS: { value: Tab; label: string }[] = [
 ];
 
 const FEATURE_TEXT: Record<Feature, { title: string; hint: string }> = {
-  aiBots: { title: 'AI 机器人', hint: '机器人联网出题、下注并公布 AI 专区的结果。需要「配置」里的 AI 模型。' },
-  wecom: {
-    title: '企业微信机器人',
-    hint: '群里 @机器人 绑定账号、聊天下注。需要「配置」里的 AI 模型和企业微信凭证。',
-  },
   polymarket: {
     title: 'Polymarket 模式',
     hint: '允许新建订单簿（Yes / No 份额）市场。关闭后已有的这类市场照常交易和结算。',
-  },
-  werewolf: {
-    title: 'AI 狼人杀',
-    hint: '一桌 AI 玩家自己打狼人杀，一局接一局、每局之间休息一会儿，发言实时直播，大家押哪边赢或某个玩家会不会出局（奖池模式）。需要「配置」里的 AI 模型，人数也在那里改。每局要调用几十次模型，注意费用。',
   },
   mimic: {
     title: 'Polymarket 镜像盘',
@@ -216,12 +205,7 @@ function OverviewTab({ data }: { data: AdminOverview }) {
 function FeatureStatus({ feature }: { feature: FeatureState }) {
   if (!feature.enabled) return <span className="text-faint">已关闭</span>;
   if (feature.active) return <span className="text-yes">运行中</span>;
-  // On without its credentials is a misconfiguration, not "off".
-  return (
-    <span className={clsx('text-right', feature.configured === false ? 'text-no' : 'text-gold')}>
-      {feature.problem ?? '未运行'}
-    </span>
-  );
+  return <span className="text-right text-gold">{feature.problem ?? '未运行'}</span>;
 }
 
 function Switch({
@@ -264,7 +248,7 @@ function FeaturesTab({ features, topK }: { features: FeatureState[]; topK: numbe
     mutationFn: ({ key, enabled }: { key: Feature; enabled: boolean }) => api.admin.setFeature(key, enabled),
     onSuccess: (data, { key, enabled }) => {
       qc.setQueryData(['admin', 'overview'], data);
-      // The site's own config (AI zone, WeCom, Polymarket) changes with the flags.
+      // The site's own config (Polymarket, the mirror) changes with the flags.
       void qc.invalidateQueries({ queryKey: ['config'] });
       toast.success(`已${enabled ? '开启' : '关闭'}「${FEATURE_TEXT[key].title}」`);
     },
@@ -280,16 +264,12 @@ function FeaturesTab({ features, topK }: { features: FeatureState[]; topK: numbe
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{FEATURE_TEXT[f.key].title}</span>
-              {f.configured === false && <Badge>缺少配置</Badge>}
             </div>
             <p className="mt-1 text-sm text-dim">{FEATURE_TEXT[f.key].hint}</p>
             <p className="mt-1.5 text-xs">
               <FeatureStatus feature={f} />
             </p>
             {f.enabled && f.status && <p className="mt-1 text-xs text-faint">{f.status}</p>}
-            {!f.enabled && f.configured === false && (
-              <p className="mt-1 text-xs text-faint">先在「配置」里填好并重启实例，才能打开。</p>
-            )}
             {!f.enabled && blocked(f) && (
               <p className="mt-1 text-xs text-faint">先打开「{FEATURE_TEXT[f.requires!].title}」才能打开。</p>
             )}
@@ -298,16 +278,13 @@ function FeaturesTab({ features, topK }: { features: FeatureState[]; topK: numbe
           <Switch
             label={FEATURE_TEXT[f.key].title}
             checked={f.enabled}
-            // Without credentials, or what it builds on, a feature can only be switched off, never on.
-            disabled={toggle.isPending || (!f.enabled && (f.configured === false || blocked(f)))}
+            // Without what it builds on, a feature can only be switched off, never on.
+            disabled={toggle.isPending || (!f.enabled && blocked(f))}
             onChange={(enabled) => toggle.mutate({ key: f.key, enabled })}
           />
         </div>
       ))}
-      <p className="p-5 text-xs leading-relaxed text-faint">
-        开关立即生效，不用重启。AI 机器人、企业微信机器人和 AI
-        狼人杀要用到「配置」里的凭证，凭证改过后要重启实例才生效。
-      </p>
+      <p className="p-5 text-xs leading-relaxed text-faint">开关立即生效，不用重启。</p>
     </Card>
   );
 }
@@ -637,220 +614,10 @@ function ConfigTab() {
   if (!data) return <PageLoader />;
   return (
     <div className="space-y-6">
-      <p className="text-sm text-dim">
-        这里改的是服务器上的 bot.json 和 .env，保存后要重启实例才生效。密钥只显示末四位，留空表示不改。
-      </p>
-      {data.botError && (
-        <p className="rounded border border-no/40 px-4 py-3 text-sm text-no">
-          服务器上的 bot.json 有问题：{data.botError}
-        </p>
-      )}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Keyed by the saved values so each form starts over after a save; the prefixes keep the keys distinct. */}
-        <AiConfigForm key={`ai:${JSON.stringify(data.ai)}`} ai={data.ai} />
-        <WecomConfigForm key={`wecom:${JSON.stringify(data.wecom)}`} wecom={data.wecom} hasAi={data.ai !== null} />
-      </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <WerewolfConfigForm key={`werewolf:${JSON.stringify(data.werewolf)}`} werewolf={data.werewolf} />
-      </div>
-      <SiteConfigForm key={`site:${JSON.stringify(data.site)}`} site={data.site} />
+      <p className="text-sm text-dim">这里改的是服务器上的 .env，保存后要重启实例才生效。</p>
+      {/* Keyed by the saved values so the form starts over after a save. */}
+      <SiteConfigForm key={JSON.stringify(data.site)} site={data.site} />
     </div>
-  );
-}
-
-function AiConfigForm({ ai }: { ai: AdminInstanceConfig['ai'] }) {
-  const [endpoint, setEndpoint] = useState(ai?.endpoint ?? 'https://api.anthropic.com');
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState(ai?.model ?? '');
-  const [bots, setBots] = useState(String(ai?.bots ?? 50));
-  const [marketsPerDay, setMarketsPerDay] = useState(String(ai?.marketsPerDay ?? 2));
-  const [betsPerDay, setBetsPerDay] = useState(String(ai?.betsPerDay ?? 50));
-  const [flip, setFlip] = useState(String(ai?.flipProbability ?? 0.2));
-  const save = useSaveConfig(api.admin.saveAi);
-
-  return (
-    <Card className="p-6">
-      <h2 className="font-semibold">AI 模型</h2>
-      <p className="mt-1 text-xs text-faint">AI 机器人和企业微信聊天共用；Anthropic Messages API 或兼容的中转。</p>
-      <form
-        className="mt-4 space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          save.mutate(
-            {
-              endpoint: endpoint.trim(),
-              apiKey: apiKey.trim() || undefined,
-              model: model.trim(),
-              bots: numberField(bots),
-              marketsPerDay: numberField(marketsPerDay),
-              betsPerDay: numberField(betsPerDay),
-              flipProbability: numberField(flip),
-            },
-            // Never keep a typed secret around once it is saved.
-            { onSuccess: () => setApiKey('') },
-          );
-        }}
-      >
-        <Field label="Endpoint">
-          <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
-        </Field>
-        <Field label="API key" hint={ai?.apiKeyHint ? `${ai.apiKeyHint}，留空不改` : undefined}>
-          <Input
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={ai?.apiKeyHint ? '留空表示不改' : '必填'}
-          />
-        </Field>
-        <Field label="模型">
-          <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="例如 claude-opus-5-5" />
-        </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="机器人数量">
-            <Input type="number" min={1} value={bots} onChange={(e) => setBots(e.target.value)} />
-          </Field>
-          <Field label="押反概率" hint="0 到 1">
-            <Input type="number" min={0} max={1} step="0.05" value={flip} onChange={(e) => setFlip(e.target.value)} />
-          </Field>
-          <Field label="每天出题上限" hint="最花钱的部分">
-            <Input type="number" min={0} value={marketsPerDay} onChange={(e) => setMarketsPerDay(e.target.value)} />
-          </Field>
-          <Field label="每天下注上限">
-            <Input type="number" min={0} value={betsPerDay} onChange={(e) => setBetsPerDay(e.target.value)} />
-          </Field>
-        </div>
-        <Button type="submit" loading={save.isPending} disabled={!endpoint.trim() || !model.trim()}>
-          保存
-        </Button>
-      </form>
-    </Card>
-  );
-}
-
-function WecomConfigForm({ wecom, hasAi }: { wecom: AdminInstanceConfig['wecom']; hasAi: boolean }) {
-  const [botId, setBotId] = useState(wecom?.botId ?? '');
-  const [secret, setSecret] = useState('');
-  const [siteUrl, setSiteUrl] = useState(
-    wecom?.siteUrl ?? `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/+$/, ''),
-  );
-  const [siteName, setSiteName] = useState(wecom?.siteName ?? 'Watercooler');
-  const [perHour, setPerHour] = useState(String(wecom?.messagesPerHour ?? 30));
-  const save = useSaveConfig(api.admin.saveWecom);
-  const remove = useSaveConfig(api.admin.removeWecom, '已移除，重启实例后生效');
-
-  return (
-    <Card className="p-6">
-      <h2 className="font-semibold">企业微信机器人</h2>
-      <p className="mt-1 text-xs text-faint">企业微信智能机器人，连接方式选「长连接」。</p>
-      {!hasAi ? (
-        <p className="mt-4 text-sm text-dim">先保存左边的 AI 模型配置：企业微信聊天用的是同一个模型。</p>
-      ) : (
-        <form
-          className="mt-4 space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            save.mutate(
-              {
-                botId: botId.trim(),
-                secret: secret.trim() || undefined,
-                siteUrl: siteUrl.trim(),
-                siteName: siteName.trim(),
-                messagesPerHour: numberField(perHour),
-              },
-              { onSuccess: () => setSecret('') },
-            );
-          }}
-        >
-          <Field label="Bot ID">
-            <Input value={botId} onChange={(e) => setBotId(e.target.value)} />
-          </Field>
-          <Field label="Secret" hint={wecom?.secretHint ? `${wecom.secretHint}，留空不改` : undefined}>
-            <Input
-              type="password"
-              autoComplete="off"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              placeholder={wecom?.secretHint ? '留空表示不改' : '必填'}
-            />
-          </Field>
-          <Field label="网站地址" hint="绑定链接和市场链接用这个地址">
-            <Input value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="网站名称">
-              <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} />
-            </Field>
-            <Field label="每人每小时消息上限">
-              <Input type="number" min={1} value={perHour} onChange={(e) => setPerHour(e.target.value)} />
-            </Field>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button type="submit" loading={save.isPending} disabled={!botId.trim() || !siteUrl.trim()}>
-              保存
-            </Button>
-            {wecom && (
-              <Button
-                type="button"
-                variant="danger"
-                loading={remove.isPending}
-                onClick={() => remove.mutate(undefined)}
-              >
-                移除企业微信配置
-              </Button>
-            )}
-          </div>
-        </form>
-      )}
-    </Card>
-  );
-}
-
-function WerewolfConfigForm({ werewolf }: { werewolf: AdminInstanceConfig['werewolf'] }) {
-  const [players, setPlayers] = useState(String(werewolf?.players ?? 9));
-  const [rest, setRest] = useState(String(werewolf?.restMinutes ?? 10));
-  const [model, setModel] = useState(werewolf?.model ?? '');
-  const save = useSaveConfig(api.admin.saveWerewolf);
-
-  return (
-    <Card className="p-6">
-      <h2 className="font-semibold">AI 狼人杀</h2>
-      <p className="mt-1 text-xs text-faint">
-        {`${WEREWOLF_MIN_PLAYERS} 到 ${WEREWOLF_MAX_PLAYERS} 人，三分之一是狼人，配预言家、女巫，8 人起加猎人。场上剩一半人时停止下注。新设置从重启后的下一局开始。`}
-      </p>
-      {!werewolf ? (
-        <p className="mt-4 text-sm text-dim">先保存 AI 模型配置：狼人杀的玩家用的是同一个 API key。</p>
-      ) : (
-        <form
-          className="mt-4 space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            save.mutate({ players: numberField(players), restMinutes: numberField(rest), model: model.trim() });
-          }}
-        >
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="玩家人数">
-              <Input
-                type="number"
-                min={WEREWOLF_MIN_PLAYERS}
-                max={WEREWOLF_MAX_PLAYERS}
-                value={players}
-                onChange={(e) => setPlayers(e.target.value)}
-              />
-            </Field>
-            <Field label="每局之间休息（分钟）">
-              <Input type="number" min={1} max={120} value={rest} onChange={(e) => setRest(e.target.value)} />
-            </Field>
-          </div>
-          <Field label="玩家用的模型" hint="留空和 AI 模型配置一样；可以换成更便宜的模型省钱">
-            <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="和 AI 模型一样" />
-          </Field>
-          <Button type="submit" loading={save.isPending}>
-            保存
-          </Button>
-        </form>
-      )}
-    </Card>
   );
 }
 

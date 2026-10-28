@@ -1,10 +1,7 @@
 import {
-  adminAiConfigSchema,
   adminBalanceSchema,
   adminFeatureSchema,
   adminSiteConfigSchema,
-  adminWecomConfigSchema,
-  adminWerewolfConfigSchema,
   adminGrantAllSchema,
   adminMimicSchema,
   adminUserSchema,
@@ -29,26 +26,16 @@ import {
   setAdmin,
   setFeatureFlag,
 } from '../services/admin';
-import {
-  describeInstanceConfig,
-  readText,
-  removeWecomConfig,
-  saveAiConfig,
-  saveSiteConfig,
-  saveWecomConfig,
-  saveWerewolfConfig,
-} from '../services/instanceConfig';
+import { describeInstanceConfig, readText, saveSiteConfig } from '../services/instanceConfig';
 import { getMimicTopK, setMimicTopK } from '../mimic/sync';
 
 /** Instance management; every route needs an admin (see requireAdmin). */
 export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
   const app = new Hono<AppEnv>();
   const startedAt = Math.round(Date.now() - process.uptime() * 1000);
-  // The configuration files as this process found them; a difference later means a restart is due.
-  const botAtStart = readText(config.botConfigPath);
+  // The .env file as this process found it; a difference later means a restart is due.
   const envAtStart = readText(config.envFilePath);
-  const restartNeeded = () =>
-    readText(config.botConfigPath) !== botAtStart || readText(config.envFilePath) !== envAtStart;
+  const restartNeeded = () => readText(config.envFilePath) !== envAtStart;
 
   const overview = (): AdminOverview => ({
     instance: config.instance,
@@ -69,24 +56,10 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
   app.post('/admin/features', async (c) => {
     const admin = requireAdmin(c);
     const { key, enabled } = await parseBody(c, adminFeatureSchema);
-    // The flag alone decides what runs, so it may only go on once the running instance has the
-    // credentials (saved ones count after the restart).
-    if (
-      enabled &&
-      (key === 'aiBots' || key === 'wecom' || key === 'werewolf') &&
-      !runtime?.features().find((f) => f.key === key)?.configured
-    ) {
-      throw conflict(
-        key === 'wecom'
-          ? '还没有企业微信配置：先在「配置」里填写并重启'
-          : '还没有 AI 模型配置：先在「配置」里填写并重启',
-      );
-    }
     const needs = FEATURE_REQUIRES[key];
     if (enabled && needs && !featureOn(getFeatureFlags(db), needs)) throw conflict('先打开「Polymarket 模式」');
     setFeatureFlag(db, admin.id, key, enabled, now());
-    // Bots, the WeCom bot and the werewolf games start or stop right away; Polymarket is checked
-    // on every new market.
+    // The mirror starts syncing right away; Polymarket is checked on every new market.
     await runtime?.apply();
     return c.json(overview());
   });
@@ -113,43 +86,6 @@ export function adminRoutes({ db, config, now, runtime, restart }: AppDeps) {
 
   app.get('/admin/config', (c) => {
     requireAdmin(c);
-    return c.json<AdminInstanceConfig>(configView());
-  });
-
-  app.post('/admin/config/ai', async (c) => {
-    const admin = requireAdmin(c);
-    const input = await parseBody(c, adminAiConfigSchema);
-    const newKey = saveAiConfig(config.botConfigPath, input);
-    audit(db, admin.id, 'config', `更新 AI 模型配置（模型 ${input.model}${newKey ? '，更换了 API key' : ''}）`, now());
-    return c.json<AdminInstanceConfig>(configView());
-  });
-
-  app.post('/admin/config/wecom', async (c) => {
-    const admin = requireAdmin(c);
-    const input = await parseBody(c, adminWecomConfigSchema);
-    const newSecret = saveWecomConfig(config.botConfigPath, input);
-    audit(db, admin.id, 'config', `更新企业微信配置${newSecret ? '（更换了 Secret）' : ''}`, now());
-    return c.json<AdminInstanceConfig>(configView());
-  });
-
-  app.post('/admin/config/wecom/remove', (c) => {
-    const admin = requireAdmin(c);
-    removeWecomConfig(config.botConfigPath);
-    audit(db, admin.id, 'config', '移除企业微信配置', now());
-    return c.json<AdminInstanceConfig>(configView());
-  });
-
-  app.post('/admin/config/werewolf', async (c) => {
-    const admin = requireAdmin(c);
-    const input = await parseBody(c, adminWerewolfConfigSchema);
-    saveWerewolfConfig(config.botConfigPath, input);
-    audit(
-      db,
-      admin.id,
-      'config',
-      `更新 AI 狼人杀配置（${input.players} 人，每局休息 ${input.restMinutes} 分钟${input.model ? `，模型 ${input.model}` : ''}）`,
-      now(),
-    );
     return c.json<AdminInstanceConfig>(configView());
   });
 

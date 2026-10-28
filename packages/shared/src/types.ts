@@ -26,16 +26,10 @@ export interface AppConfig {
   startingBalance: number;
   dailyBonus: number;
   privateMode: boolean;
-  /** Whether the AI zone exists (bots are running or there are AI markets). */
-  aiZone: boolean;
-  /** Whether the WeCom (企业微信) bot is connected, so accounts can be bound to it. */
-  wecom: boolean;
   /** Whether the Polymarket mirror (top markets copied from polymarket.com) is on. */
   mimic: boolean;
   /** Whether new markets may use the Polymarket (order book) mode. */
   polymarket: boolean;
-  /** Whether the AI werewolf (狼人杀) games are running. */
-  werewolf: boolean;
 }
 
 /** `closed` is derived: betting time is over but the creator has not announced the result yet. */
@@ -63,8 +57,6 @@ export interface MarketSummary {
   category: string;
   status: MarketStatus;
   isBinary: boolean;
-  /** Created by an AI bot; lives in the AI zone. */
-  isAi: boolean;
   /** Pool pot, or currently locked complete-set collateral for a Polymarket market. */
   pot: number;
   closeAt: number;
@@ -83,8 +75,6 @@ export interface MarketSummary {
    * site at those prices, so trades here never move them. Results follow Polymarket's.
    */
   mimic?: MimicInfo;
-  /** A bet on an AI werewolf game: which side wins (seat null) or whether that seat is voted or killed out. */
-  werewolf?: { gameId: number; seat: number | null };
 }
 
 /** A filled Polymarket mirror order. */
@@ -338,19 +328,7 @@ export interface LeaderboardEntry {
   stats: UserStats;
 }
 
-/** The AI zone at a glance. */
-export interface AiZoneSummary {
-  bots: number;
-  openMarkets: number;
-  /** Total staked in AI markets so far. */
-  pot: number;
-  /** What people (not bots) have won or lost on settled AI markets. */
-  humanProfit: number;
-  /** The bots with the most money. */
-  richestBots: LeaderboardEntry[];
-}
-
-/** Stats for markets made by people (the AI zone has its own summary). */
+/** Stats for markets made by people. */
 export interface SiteStats {
   openMarkets: number;
   totalStaked: number;
@@ -358,32 +336,16 @@ export interface SiteStats {
   users: number;
 }
 
-/** A site account's link to a WeCom (企业微信) account. */
-export interface WecomBinding {
-  wecomUserId: string;
-  createdAt: number;
-}
-
-/** What a binding link would do, shown before the user confirms. */
-export interface WecomBindRequest {
-  wecomUserId: string;
-  expiresAt: number;
-  /** The signed-in user's current binding, which confirming would replace. */
-  current: WecomBinding | null;
-}
-
 /** Instance features an admin can switch on and off while the site runs. */
-export const FEATURES = ['aiBots', 'wecom', 'polymarket', 'mimic', 'werewolf'] as const;
+export const FEATURES = ['polymarket', 'mimic'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export interface FeatureState {
   key: Feature;
   enabled: boolean;
-  /** For features that need bot.json: whether it is there and valid. Null when nothing is needed. */
-  configured: boolean | null;
   /** Whether the feature is actually running right now. */
   active: boolean;
-  /** Why it is not active although enabled (missing config, failed to start, ...). */
+  /** Why it is not active although enabled (e.g. a failed Polymarket sync). */
   problem: string | null;
   /** Another feature that has to be on before this one can be switched on. */
   requires?: Feature;
@@ -440,109 +402,8 @@ export interface AdminSiteConfig {
   timezone: string;
 }
 
-/** What /admin shows of the saved configuration. Secrets only ever come back as a hint. */
+/** What /admin shows of the saved configuration. */
 export interface AdminInstanceConfig {
-  /** Model settings shared by the AI bots and the WeCom chat; null while there is no bot.json. */
-  ai: {
-    endpoint: string;
-    model: string;
-    apiKeyHint: string;
-    bots: number;
-    marketsPerDay: number;
-    betsPerDay: number;
-    flipProbability: number;
-  } | null;
-  wecom: {
-    botId: string;
-    secretHint: string;
-    siteUrl: string;
-    siteName: string;
-    messagesPerHour: number;
-  } | null;
-  /** The AI werewolf games' settings (defaults while bot.json has none); null while there is no bot.json. */
-  werewolf: AdminWerewolfConfig | null;
   site: AdminSiteConfig;
-  /** Why the saved bot.json cannot be used, if it cannot. */
-  botError: string | null;
   restartNeeded: boolean;
-}
-
-export interface AdminWerewolfConfig {
-  players: number;
-  restMinutes: number;
-  /** Model for the players; empty means the AI model above. */
-  model: string;
-}
-
-export type WerewolfRole = 'wolf' | 'seer' | 'witch' | 'hunter' | 'villager';
-export type WerewolfSide = 'good' | 'wolves';
-/** waiting: seats dealt and betting open until it starts; aborted: could not be finished, bets refunded. */
-export type WerewolfStatus = 'waiting' | 'running' | 'ended' | 'aborted';
-
-export interface WerewolfSeat {
-  seat: number;
-  name: string;
-  /** Playing style, public from the start. */
-  persona: string;
-  alive: boolean;
-  /** Day of death (night deaths count for the morning they are announced). */
-  diedDay: number | null;
-  /** How the seat died, once announced: 'night' covers both the wolves' kill and the witch's poison. */
-  death: 'night' | 'exile' | 'shot' | null;
-  /** Hidden until the game is over, except a hunter who has fired. */
-  role: WerewolfRole | null;
-  /** The pool market on whether this seat is out by the end of the game. */
-  marketId: number;
-}
-
-export interface WerewolfEvent {
-  id: number;
-  day: number;
-  kind: string;
-  seat: number | null;
-  target: number | null;
-  /** What everyone saw or heard, rendered in Chinese. */
-  text: string;
-  /** The player's private reasoning; only shown once the game is over. */
-  thought: string | null;
-  /** Night actions and wolf talk are hidden while the game runs. */
-  public: boolean;
-  createdAt: number;
-}
-
-export interface WerewolfGameSummary {
-  id: number;
-  status: WerewolfStatus;
-  players: number;
-  /** Betting stops once at most this many players are alive. */
-  cutoff: number;
-  alive: number;
-  day: number;
-  /** e.g. 「第 2 天 · 白天发言」. */
-  phase: string;
-  startsAt: number;
-  startedAt: number | null;
-  endedAt: number | null;
-  winner: WerewolfSide | null;
-  bettingOpen: boolean;
-  /** Everything staked on this game's markets. */
-  pot: number;
-}
-
-export interface WerewolfGame extends WerewolfGameSummary {
-  /** The board, e.g. 3 wolves, seer, witch, hunter, 3 villagers. */
-  roles: { role: WerewolfRole; count: number }[];
-  seats: WerewolfSeat[];
-  events: WerewolfEvent[];
-  /** Pool market on the winning side: outcomes 好人 / 狼人. */
-  sideMarket: MarketSummary;
-  /** Pool markets per seat: outcomes 出局 / 存活, in seat order. */
-  seatMarkets: MarketSummary[];
-}
-
-export interface WerewolfLobby {
-  enabled: boolean;
-  /** The game being played or about to start. */
-  current: WerewolfGameSummary | null;
-  recent: WerewolfGameSummary[];
 }

@@ -516,4 +516,8 @@ export const migrations: string[] = [
   ALTER TABLE markets ADD COLUMN werewolf_seat INTEGER;
   CREATE INDEX markets_werewolf ON markets(werewolf_game_id) WHERE werewolf_game_id IS NOT NULL;
   `,
+  /* 13: the AI bots, AI werewolf and WeCom bot are gone. Their tables and markets stay as history;
+        werewolf markets count as AI markets so they stay out of the people's lists like the bots'. */ `
+  UPDATE markets SET is_ai = 1 WHERE werewolf_game_id IS NOT NULL;
+  `,
 ];

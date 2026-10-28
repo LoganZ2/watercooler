@@ -3,7 +3,6 @@ import { CURRENCY_NAME } from '@watercooler/shared';
 import clsx from 'clsx';
 import {
   BarChart3,
-  Bot,
   ChevronUp,
   Gift,
   LayoutGrid,
@@ -196,7 +195,6 @@ function Navbar() {
         <Logo compact />
         <nav className="hidden items-center md:flex">
           <NavItem to="/">市场</NavItem>
-          {config?.aiZone && <NavItem to="/ai">AI 专区</NavItem>}
           {config?.mimic && <NavItem to="/polymarket">Polymarket</NavItem>}
           <NavItem to="/leaderboard">排行榜</NavItem>
           {me && <NavItem to="/portfolio">我的下注</NavItem>}
@@ -277,11 +275,9 @@ function Ticker() {
 
 function MobileNav() {
   const { me } = useMe();
-  const config = useConfig();
   const items = [
     { to: '/', icon: LayoutGrid, label: '市场' },
-    // Five slots: the AI zone takes the leaderboard's (still linked from the home page and footer).
-    config?.aiZone ? { to: '/ai', icon: Bot, label: 'AI 专区' } : { to: '/leaderboard', icon: Trophy, label: '排行' },
+    { to: '/leaderboard', icon: Trophy, label: '排行' },
     { to: '/create', icon: Plus, label: '创建', primary: true },
     { to: me ? '/portfolio' : '/login', icon: BarChart3, label: '下注' },
     { to: me ? `/u/${me.id}` : '/login', icon: UserIcon, label: '我的' },
@@ -354,8 +350,6 @@ function Footer() {
       title: '市场',
       links: [
         { to: '/', label: '全部市场' },
-        ...(config?.aiZone ? [{ to: '/ai', label: 'AI 专区' }] : []),
-        ...(config?.werewolf ? [{ to: '/werewolf', label: 'AI 狼人杀' }] : []),
         ...(config?.mimic ? [{ to: '/polymarket', label: 'Polymarket 热门' }] : []),
         { to: '/?sort=closing', label: '即将截止' },
         { to: '/?status=resolved', label: '已结束' },

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { CATEGORIES, CURRENCY_NAME, type MarketSummary } from '@watercooler/shared';
 import clsx from 'clsx';
-import { Bot, ChevronRight, Flame, Plus, Search, Sparkles, TrendingUp } from 'lucide-react';
+import { ChevronRight, Flame, Plus, Search, Sparkles, TrendingUp } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Avatar } from '../components/Avatar';
@@ -312,30 +312,6 @@ function MarketBrowser() {
   );
 }
 
-/** A strip pointing at the AI zone, where people can win the bots' money. */
-function AiZoneTeaser() {
-  const config = useConfig();
-  const { data } = useQuery({ queryKey: ['aiZone'], queryFn: api.aiZone, enabled: !!config?.aiZone });
-  if (!config?.aiZone || !data) return null;
-  return (
-    <section className="mx-auto max-w-7xl px-4 pb-16">
-      <Link to="/ai" className="surface card-hover flex flex-col gap-4 rounded-lg p-6 sm:flex-row sm:items-center">
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-brand-light text-brand">
-          <Bot className="size-6" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-lg font-semibold">AI 专区 · {data.bots} 个机器人在押注</div>
-          <p className="mt-1 text-sm leading-relaxed text-dim">
-            AI 联网找新闻出题、自己下注、自己公布结果，现在有 {data.openMarkets} 道题、{formatCompact(data.pot)}{' '}
-            {CURRENCY_NAME}奖池。判断比 AI 准，就能把它们的{CURRENCY_NAME}赢过来。
-          </p>
-        </div>
-        <span className={buttonClass({ pill: true, className: 'self-start sm:self-center' })}>去 AI 专区</span>
-      </Link>
-    </section>
-  );
-}
-
 /** Latest trades and the leaderboard side by side. */
 function CommunitySection() {
   const { data: activity } = useQuery({ queryKey: ['activity'], queryFn: () => api.activity(24) });
@@ -434,7 +410,6 @@ export default function Home() {
     <>
       <Hero />
       <MarketBrowser />
-      <AiZoneTeaser />
       <CommunitySection />
       <CallToAction />
     </>

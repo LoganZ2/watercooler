@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cancelOrder, placeOrder, splitMerge } from '../src/services/exchange';
 import { cancelMarket, resolveMarket } from '../src/services/bets';
-import { createAction, executeAction } from '../src/wecom/actions';
-import { runTool, type ToolContext } from '../src/wecom/tools';
 import { HttpError } from '../src/lib/http';
 import { setup } from './helpers';
 
@@ -56,20 +54,15 @@ describe('Polymarket exchange', () => {
     expect((await e.alice.post(`${e.base}/split`, { quantity: 1001 })).status).toBe(400);
   });
 
-  it('keeps AI bots out of human order books and collateral operations', async () => {
+  it('keeps bot accounts out of order books and collateral operations', async () => {
     const e = await fixture();
     e.db.prepare('UPDATE users SET is_bot = 1 WHERE id = 1').run();
-    expect(() => splitMerge(e.db, 1, e.id, 2, 'split', e.clock.now)).toThrow('机器人只能在 AI 专区交易');
+    expect(() => splitMerge(e.db, 1, e.id, 2, 'split', e.clock.now)).toThrow('机器人账号不能交易');
     expect(() =>
       placeOrder(e.db, 1, e.id, { outcomeId: e.yes, side: 'buy', price: 0.4, quantity: 1 }, e.clock.now),
-    ).toThrow('机器人只能在 AI 专区交易');
+    ).toThrow('机器人账号不能交易');
     expect(e.db.prepare('SELECT COUNT(*) AS n FROM exchange_orders').get()).toEqual({ n: 0 });
     expect(e.db.prepare('SELECT balance FROM users WHERE id = 1').get()).toEqual({ balance: 100000 });
-    e.db.prepare('UPDATE markets SET is_ai = 1 WHERE id = ?').run(e.id);
-    splitMerge(e.db, 1, e.id, 2, 'split', e.clock.now);
-    expect(
-      placeOrder(e.db, 1, e.id, { outcomeId: e.yes, side: 'sell', price: 0.6, quantity: 1 }, e.clock.now).status,
-    ).toBe('open');
   });
 
   it('matches best prices then FIFO, partially fills and refunds limit price improvement', async () => {
@@ -375,14 +368,12 @@ describe('Polymarket exchange', () => {
     });
   });
 
-  it('forbids market cancellation through the API, automatic calls, and WeCom while retaining order cancellation', async () => {
+  it('forbids market cancellation through the API and automatic calls while retaining order cancellation', async () => {
     const e = await fixture();
     await e.alice.post(`${e.base}/split`, { quantity: 10 });
     await e.order(e.alice, e.yes, 'sell', 0.8, 10);
     await e.order(e.bob, e.yes, 'buy', 0.8, 10);
     const pending = (await e.order(e.alice, e.no, 'buy', 0.2, 3)).body;
-    // Even a confirmation card issued under the former policy must not cancel the market.
-    const staleAction = createAction(e.db, 1, 'fake-cancel-user', { kind: 'cancel', marketId: e.id }, e.clock.now);
     const snapshot = () =>
       [
         'users',
@@ -393,7 +384,6 @@ describe('Polymarket exchange', () => {
         'markets',
         'outcomes',
         'price_history',
-        'wecom_actions',
       ].map((table) => e.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     const before = snapshot();
     const result = await e.alice.post(`${e.base}/cancel`);
@@ -401,18 +391,6 @@ describe('Polymarket exchange', () => {
     expect(result.body.error).toContain('Polymarket 市场不可取消');
     expect(snapshot()).toEqual(before);
     expect(() => cancelMarket(e.db, e.id, null, undefined, e.clock.now)).toThrow('Polymarket 市场不可取消');
-    expect(() => executeAction(e.db, staleAction, e.clock.now)).toThrow('Polymarket 市场不可取消');
-    const ctx: ToolContext = {
-      db: e.db,
-      config: e.config,
-      now: e.clock.now,
-      siteUrl: 'https://example.invalid',
-      userId: 1,
-      wecomUserId: 'fake-cancel-user',
-      card: null,
-    };
-    expect(runTool(ctx, 'cancel_market', { marketId: e.id })).toMatchObject({ isError: true });
-    expect(ctx.card).toBeNull();
     expect(snapshot()).toEqual(before);
     expect((await e.alice.get(e.base)).body.market.status).toBe('open');
     expect((await e.state()).collateral).toBe(10);

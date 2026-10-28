@@ -47,7 +47,7 @@ export function getUserByUsername(db: DB, username: string): UserRow | undefined
   return db.prepare('SELECT * FROM users WHERE username = ?').get(username) as UserRow | undefined;
 }
 
-/** Usernames with this prefix are reserved for AI bots. */
+/** Usernames with this prefix belong to the AI bots this site once had, so they stay reserved. */
 export const BOT_USERNAME_PREFIX = 'ai_bot_';
 
 export interface LedgerOptions {
@@ -85,17 +85,16 @@ export async function createUser(
   config: Config,
   input: { username: string; displayName: string; password: string },
   now: number,
-  opts: { bot?: boolean } = {},
 ): Promise<UserRow> {
   if (getUserByUsername(db, input.username)) throw conflict('用户名已被占用');
-  if (!opts.bot && input.username.toLowerCase().startsWith(BOT_USERNAME_PREFIX)) throw conflict('用户名已被占用');
+  if (input.username.toLowerCase().startsWith(BOT_USERNAME_PREFIX)) throw conflict('用户名已被占用');
   const passwordHash = await hashPassword(input.password);
   return db.transaction(() => {
     // Re-check inside the transaction: hashing is async, another request may have won the race.
     if (getUserByUsername(db, input.username)) throw conflict('用户名已被占用');
     const { lastInsertRowid } = db
-      .prepare('INSERT INTO users (username, display_name, password_hash, is_bot, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(input.username, input.displayName, passwordHash, opts.bot ? 1 : 0, now);
+      .prepare('INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)')
+      .run(input.username, input.displayName, passwordHash, now);
     const id = Number(lastInsertRowid);
     const starting = Math.round(config.startingBalance * 100);
     if (starting > 0) adjustBalance(db, id, starting, 'signup', now, { note: '注册奖励' });
@@ -118,8 +117,8 @@ export function claimDailyBonus(db: DB, config: Config, userId: number, now: num
 }
 
 /**
- * A bot account the site itself runs (the Polymarket mirror's creator, the werewolf judge): made
- * once, remembered under `settingKey`, unable to log in, and never an AI bot (those are ai_bot_*).
+ * A bot account the site itself runs (the Polymarket mirror's creator): made once, remembered
+ * under `settingKey` and unable to log in.
  */
 export function systemUser(db: DB, settingKey: string, username: string, displayName: string, now: number): number {
   const saved = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey) as { value: string } | undefined;
@@ -138,6 +137,3 @@ export function systemUser(db: DB, settingKey: string, username: string, display
   ).run(settingKey, String(id), now);
   return id;
 }
-
-/** The settings keys of the site's own bot accounts, which never rank. */
-export const SYSTEM_USER_KEYS = ['mimic.creator', 'werewolf.host'] as const;

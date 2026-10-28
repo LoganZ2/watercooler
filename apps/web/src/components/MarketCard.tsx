@@ -110,9 +110,6 @@ export function MarketCard({ market, preview }: { market: MarketSummary; preview
       </div>
 
       <footer className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-xs text-faint">
-        {market.isAi && (
-          <span className="rounded bg-brand-light px-1.5 py-0.5 text-[10px] font-semibold text-brand">AI</span>
-        )}
         {market.mimic ? (
           <span className="inline-flex items-center gap-1">
             {market.mimic.rank !== null && (

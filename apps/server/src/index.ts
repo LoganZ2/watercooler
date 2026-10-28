@@ -10,7 +10,7 @@ loadDotEnv();
 const config = loadConfig();
 const db = openDatabase(config.databasePath);
 
-// AI bots, the WeCom bot and the Polymarket mirror follow the admin's feature flags (see runtime.ts).
+// The Polymarket mirror follows the admin's feature flags (see runtime.ts).
 const polymarket = createPolymarketClient(config);
 const runtime = createRuntime({ db, config, now: Date.now, polymarket });
 const app = createApp({ db, config, now: Date.now, runtime, restart: controlScriptRestart(), polymarket });
@@ -24,10 +24,6 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 });
 
 await runtime.apply();
-for (const f of runtime.features()) {
-  // A feature switched on without its credentials is a misconfiguration worth seeing in the log.
-  if (f.enabled && f.problem) console.warn(`   ${f.key} is on but not running: ${f.problem}`);
-}
 
 function shutdown() {
   runtime.stop();

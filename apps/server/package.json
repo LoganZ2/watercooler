@@ -13,9 +13,7 @@
     "cli": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
     "@hono/node-server": "^1.19.5",
-    "@wecom/aibot-node-sdk": "^1.0.7",
     "better-sqlite3": "^12.4.1",
     "hono": "^4.10.0",
     "zod": "^4.1.0"

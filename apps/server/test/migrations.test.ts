@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db';
 import { migrations } from '../src/db/migrations';
+import { listMarkets } from '../src/services/markets';
 
 describe('upstream and Polymarket database upgrades', () => {
   const cases = [
@@ -119,6 +120,35 @@ describe('upstream and Polymarket database upgrades', () => {
         amount: null,
       });
       expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      if (db.open) db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the old AI werewolf markets out of the people's lists with the bots' markets", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wc-migrate-'));
+    const path = join(dir, 'db.sqlite');
+    let db = new Database(path);
+    try {
+      for (const migration of migrations.slice(0, 12)) db.exec(migration);
+      db.pragma('user_version = 12');
+      db.exec(`
+        INSERT INTO users(id,username,display_name,password_hash,balance,is_bot,created_at)
+          VALUES (1,'werewolf','狼人杀法官','!',0,1,0),(2,'alice','alice','h',0,0,0);
+        INSERT INTO werewolf_games(id,status,players,cutoff,seats,starts_at,created_at)
+          VALUES (1,'running',9,5,'[]',0,0);
+        INSERT INTO markets(id,question,category,creator_id,close_at,settle_at,created_at,werewolf_game_id)
+          VALUES (1,'AI 狼人杀第 1 局：好人还是狼人获胜？','娱乐',1,9e12,9e12,0,1),
+                 (2,'周五下雨吗？','生活',2,9e12,9e12,0,NULL);
+      `);
+      db.close();
+      db = openDatabase(path);
+      expect(db.prepare('SELECT id, is_ai FROM markets ORDER BY id').all()).toEqual([
+        { id: 1, is_ai: 1 },
+        { id: 2, is_ai: 0 },
+      ]);
+      expect(listMarkets(db, 0, { zone: 'human' }).map((m) => m.id)).toEqual([2]);
     } finally {
       if (db.open) db.close();
       rmSync(dir, { recursive: true, force: true });

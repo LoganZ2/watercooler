@@ -1,49 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button, Card, Field, Input } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { useConfig, useMe } from '../lib/auth';
-import { formatDate } from '../lib/format';
+import { useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/site';
-
-/** The WeCom (企业微信) binding: shown when the bot is on, or while an old binding is still around. */
-function WecomSection() {
-  const config = useConfig();
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['wecomBinding'], queryFn: api.wecomBinding });
-  const unbind = useMutation({
-    mutationFn: api.wecomUnbind,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['wecomBinding'] });
-      toast.success('已解除绑定');
-    },
-    onError: (err) => toast.error(errorMessage(err)),
-  });
-  const binding = data?.binding;
-  if (!config?.wecom && !binding) return null;
-
-  return (
-    <Card className="space-y-4 p-6">
-      <h2 className="font-semibold">企业微信</h2>
-      {binding ? (
-        <>
-          <p className="text-sm leading-relaxed text-dim">
-            已绑定企业微信（{formatDate(binding.createdAt)}）。在群里 @机器人
-            就能查盘、下注、开盘，结算结果也会发到群里。
-          </p>
-          <Button variant="danger" onClick={() => unbind.mutate()} loading={unbind.isPending}>
-            解除绑定
-          </Button>
-        </>
-      ) : (
-        <p className="text-sm leading-relaxed text-dim">
-          还没有绑定。在企业微信群里 @机器人 说句话，它会发给你一个专属绑定链接，打开后确认即可。
-        </p>
-      )}
-    </Card>
-  );
-}
 
 export default function SettingsPage() {
   usePageTitle('账号设置');
@@ -117,7 +78,6 @@ export default function SettingsPage() {
           修改密码
         </Button>
       </Card>
-      <WecomSection />
     </div>
   );
 }

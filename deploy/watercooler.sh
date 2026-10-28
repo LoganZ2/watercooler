@@ -34,9 +34,6 @@ export NODE_ENV=production
 export HOST=127.0.0.1
 export PORT BASE_PATH
 export DATABASE_PATH="$APP_DIR/shared/data/$INSTANCE.db"
-# Credentials for the AI bots and the WeCom bot (see bot.example.json and deploy/README.md);
-# admins switch them on and off at /admin.
-export BOT_CONFIG="$APP_DIR/shared/bot.json"
 # Lets admins restart the instance from /admin, and shows what is deployed.
 export INSTANCE
 export CONTROL_SCRIPT="$APP_DIR/$(basename "${BASH_SOURCE[0]}")"

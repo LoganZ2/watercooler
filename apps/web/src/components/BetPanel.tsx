@@ -80,7 +80,6 @@ export function BetPanel({
         'markets',
         'stats',
         'leaderboard',
-        'werewolf',
       ]) {
         void qc.invalidateQueries({ queryKey: [key] });
       }
@@ -269,11 +268,9 @@ function ClosedPanel({ market, heading }: { market: MarketDetail; heading?: Reac
       <div className="min-w-0 flex-1">
         <div className="font-medium text-fg">{market.status === 'closed' ? '下注已截止' : '市场已取消'}</div>
         <div className="mt-1 text-xs leading-relaxed text-faint">
-          {market.status !== 'closed'
-            ? `所有下注已全额退回${CURRENCY_NAME}余额。`
-            : market.werewolf
-              ? '场上人数到了停止下注的线，这局狼人杀一结束就自动结算。'
-              : `等待 ${market.creator.displayName} 公布结果；${formatDate(market.resolveBy!)} 前没公布会自动取消、全额退款。`}
+          {market.status === 'closed'
+            ? `等待 ${market.creator.displayName} 公布结果；${formatDate(market.resolveBy!)} 前没公布会自动取消、全额退款。`
+            : `所有下注已全额退回${CURRENCY_NAME}余额。`}
         </div>
       </div>
     </Card>

@@ -1,7 +1,6 @@
 import {
   fromCents,
   round2,
-  type AiZoneSummary,
   type LeaderboardEntry,
   type LedgerEntry,
   type LedgerKind,
@@ -10,9 +9,9 @@ import {
   type SiteStats,
   type UserStats,
 } from '@watercooler/shared';
-import { placeholders, type DB } from '../db';
+import type { DB } from '../db';
 import { derivedStatus, type MarketRow } from './markets';
-import { SYSTEM_USER_KEYS, toUserRef } from './users';
+import { toUserRef } from './users';
 
 /** Stats for every user at once (cheap enough for an office-sized crowd). */
 export function computeAllStats(db: DB): Map<number, UserStats> {
@@ -80,16 +79,10 @@ export function computeAllStats(db: DB): Map<number, UserStats> {
 
 export type LeaderboardSort = 'profit' | 'netWorth' | 'bets';
 
-/** People only by default; `bots` ranks the AI bots instead. */
-export function leaderboard(db: DB, sort: LeaderboardSort = 'profit', bots = false): LeaderboardEntry[] {
+/** People only: bot accounts (the old AI bots, the mirror's creator) never rank. */
+export function leaderboard(db: DB, sort: LeaderboardSort = 'profit'): LeaderboardEntry[] {
   const stats = computeAllStats(db);
-  // The site's own accounts (mirror creator, werewolf judge) never bet; they are nobody's rival.
-  const users = db
-    .prepare(
-      `SELECT id, username, display_name FROM users WHERE is_bot = ?
-        AND id NOT IN (SELECT CAST(value AS INTEGER) FROM settings WHERE key IN (${placeholders(SYSTEM_USER_KEYS)}))`,
-    )
-    .all(bots ? 1 : 0, ...SYSTEM_USER_KEYS) as {
+  const users = db.prepare('SELECT id, username, display_name FROM users WHERE is_bot = 0').all() as {
     id: number;
     username: string;
     display_name: string;
@@ -111,8 +104,7 @@ export function userStatsAndRank(db: DB, userId: number): { stats: UserStats; ra
 }
 
 /** All of a user's stakes, one row per outcome backed, live markets first. */
-/** `werewolf: false` leaves out bets on the AI werewolf games (for the WeCom bot, which never shows them). */
-export function userBets(db: DB, userId: number, now: number, opts: { werewolf?: boolean } = {}): PortfolioBet[] {
+export function userBets(db: DB, userId: number, now: number): PortfolioBet[] {
   const rows = db
     .prepare(
       `SELECT b.outcome_id, SUM(b.amount) AS stake, o.label, o.pool, b.market_id,
@@ -122,11 +114,11 @@ export function userBets(db: DB, userId: number, now: number, opts: { werewolf?:
          FROM bets b
          JOIN outcomes o ON o.id = b.outcome_id
          JOIN markets m  ON m.id = b.market_id
-        WHERE b.user_id = ? AND (? OR m.werewolf_game_id IS NULL)
+        WHERE b.user_id = ?
         GROUP BY b.outcome_id
         ORDER BY (m.status = 'open') DESC, m.close_at ASC, b.outcome_id`,
     )
-    .all(userId, opts.werewolf === false ? 0 : 1) as {
+    .all(userId) as {
     outcome_id: number;
     stake: number;
     label: string;
@@ -221,12 +213,12 @@ export function siteStats(db: DB, now: number): SiteStats {
   const row = db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM markets WHERE is_ai = 0 AND mimic_id IS NULL AND werewolf_game_id IS NULL AND status = 'open' AND close_at > ?) AS open_markets,
-         ((SELECT COALESCE(SUM(pot), 0) FROM markets WHERE mode = 'pool' AND is_ai = 0 AND werewolf_game_id IS NULL) +
+         (SELECT COUNT(*) FROM markets WHERE is_ai = 0 AND mimic_id IS NULL AND status = 'open' AND close_at > ?) AS open_markets,
+         ((SELECT COALESCE(SUM(pot), 0) FROM markets WHERE mode = 'pool' AND is_ai = 0) +
            (SELECT COALESCE(SUM(t.price * t.quantity), 0) FROM exchange_trades t
              JOIN markets m ON m.id = t.market_id WHERE m.is_ai = 0)) AS total_staked,
          (SELECT COUNT(DISTINCT user_id) FROM (
-           SELECT b.user_id FROM bets b JOIN markets m ON m.id = b.market_id WHERE m.is_ai = 0 AND m.werewolf_game_id IS NULL
+           SELECT b.user_id FROM bets b JOIN markets m ON m.id = b.market_id WHERE m.is_ai = 0
            UNION ALL SELECT o.user_id FROM exchange_orders o JOIN markets m ON m.id = o.market_id
              WHERE m.is_ai = 0 AND o.remaining < o.quantity)) AS bettors,
          (SELECT COUNT(*) FROM users WHERE is_bot = 0) AS users`,
@@ -237,27 +229,5 @@ export function siteStats(db: DB, now: number): SiteStats {
     totalStaked: fromCents(row.total_staked),
     bettors: row.bettors,
     users: row.users,
-  };
-}
-
-export function aiZoneSummary(db: DB, now: number): AiZoneSummary {
-  const row = db
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM users WHERE is_bot = 1 AND substr(username, 1, 7) = 'ai_bot_') AS bots,
-         (SELECT COUNT(*) FROM markets WHERE is_ai = 1 AND status = 'open' AND close_at > ?) AS open_markets,
-         (SELECT COALESCE(SUM(pot), 0) FROM markets WHERE is_ai = 1)                          AS pot,
-         (SELECT COALESCE(SUM(l.amount), 0) FROM ledger l
-            JOIN users u ON u.id = l.user_id
-            JOIN markets m ON m.id = l.market_id
-           WHERE u.is_bot = 0 AND m.is_ai = 1 AND m.status <> 'open')                         AS human_profit`,
-    )
-    .get(now) as { bots: number; open_markets: number; pot: number; human_profit: number };
-  return {
-    bots: row.bots,
-    openMarkets: row.open_markets,
-    pot: fromCents(row.pot),
-    humanProfit: fromCents(row.human_profit),
-    richestBots: leaderboard(db, 'netWorth', true).slice(0, 10),
   };
 }

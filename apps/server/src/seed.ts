@@ -4,7 +4,6 @@
  *   pnpm seed --reset    # deletes the database file first
  */
 import { existsSync, rmSync } from 'node:fs';
-import { ensureBots } from './bots/agent';
 import { loadConfig, loadDotEnv } from './config';
 import { openDatabase } from './db';
 import { cancelMarket, placeBet, resolveMarket } from './services/bets';
@@ -248,58 +247,9 @@ for (const m of created) {
   }
 }
 
-// AI zone demo: a dozen bots with their own questions and bets (no model calls).
-const botIds = await ensureBots({
-  db,
-  config,
-  bot: {
-    endpoint: '',
-    apiKey: '',
-    model: '',
-    bots: 12,
-    marketsPerDay: 0,
-    betsPerDay: 0,
-    flipProbability: 0.2,
-    werewolf: { players: 9, restMinutes: 10 },
-  },
-  ask: async () => null,
-  now: () => start,
-});
-const aiSpecs = [
-  { question: '本周五美股收盘时，纳斯达克指数会比周一开盘高吗？', outcomes: ['是', '否'], category: '行情', days: 3 },
-  {
-    question: '下一届 F1 大奖赛的冠军会是谁？',
-    outcomes: ['维斯塔潘', '诺里斯', '勒克莱尔', '其他'],
-    category: '体育',
-    days: 6,
-  },
-  { question: '下个月的苹果发布会会推出折叠屏 iPhone 吗？', outcomes: ['是', '否'], category: '科技', days: 20 },
-];
-for (const spec of aiSpecs) {
-  const createdAt = now - 2 * DAY;
-  const marketId = createMarket(
-    db,
-    pick(botIds),
-    {
-      question: spec.question,
-      description: '以官方公布的结果为准。（演示数据）',
-      category: spec.category,
-      outcomes: spec.outcomes,
-      closeAt: now + spec.days * DAY,
-    },
-    createdAt,
-    { ai: true },
-  );
-  const outcomes = getOutcomeRows(db, marketId);
-  for (let k = 0; k < 15; k++) {
-    const amount = Math.round(5 + rand() * 60);
-    placeBet(db, pick(botIds), marketId, { outcomeId: pick(outcomes).id, amount }, createdAt + rand() * 2 * DAY);
-  }
-}
-
 const counts = db
   .prepare('SELECT (SELECT COUNT(*) FROM markets) AS markets, (SELECT COUNT(*) FROM bets) AS bets')
   .get() as { markets: number; bets: number };
 console.log(`✅ 已生成 ${people.length} 个用户、${counts.markets} 个市场、${counts.bets} 笔下注`);
-console.log('   演示账号: xiaoming、lili、dawei… 密码都是 demo123；AI 专区有 12 个演示机器人');
+console.log('   演示账号: xiaoming、lili、dawei… 密码都是 demo123');
 db.close();

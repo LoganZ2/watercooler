@@ -60,12 +60,12 @@ export function getBet(db: DB, id: number): Bet {
 
 export function listBets(
   db: DB,
-  opts: { marketId?: number; userId?: number; zone?: 'human' | 'ai'; before?: number; limit?: number },
+  opts: { marketId?: number; userId?: number; peopleOnly?: boolean; before?: number; limit?: number },
 ): Bet[] {
   const where: string[] = [];
   const params: unknown[] = [];
-  // The AI werewolf games keep their bets to themselves.
-  if (opts.zone) where.push(opts.zone === 'ai' ? 'm.is_ai = 1' : 'm.is_ai = 0 AND m.werewolf_game_id IS NULL');
+  // Markets made by people: the old AI bots' markets stay out of the public feed.
+  if (opts.peopleOnly) where.push('m.is_ai = 0');
   if (opts.marketId !== undefined) {
     where.push('b.market_id = ?');
     params.push(opts.marketId);
@@ -133,7 +133,7 @@ export function placeBet(db: DB, userId: number, marketId: number, input: BetInp
     if (market.mode !== 'pool') throw badRequest('Polymarket 模式请使用订单交易');
     if (!isBettable(market, now)) throw conflict('该市场已停止下注');
     const bettor = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(userId) as { is_bot: 0 | 1 } | undefined;
-    if (bettor?.is_bot && !market.is_ai) throw forbidden('机器人只能在 AI 专区下注');
+    if (bettor?.is_bot) throw forbidden('机器人账号不能下注');
     const outcomes = getOutcomeRows(db, marketId);
     const outcome = outcomes.find((o) => o.id === input.outcomeId);
     if (!outcome) throw notFound('选项不存在');

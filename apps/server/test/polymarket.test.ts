@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { placeOrder } from '../src/services/exchange';
-import { executeAction, type ActionRow } from '../src/wecom/actions';
-import { runTool, type ToolContext } from '../src/wecom/tools';
 import { setup } from './helpers';
 
 const DAY = 86_400_000;
@@ -280,101 +278,5 @@ describe('multi-outcome Polymarket markets', () => {
     expect(pool.status).toBe(201);
     expect(e.db.prepare('SELECT neg_risk FROM markets WHERE id = ?').get(pool.body.id)).toEqual({ neg_risk: 0 });
     expect((await e.alice.get(`/markets/${pool.body.id}/exchange`)).status).toBe(400);
-  });
-});
-
-describe('WeCom Polymarket tools', () => {
-  it('quotes orders on a confirmation card, bounds slippage and fills only when confirmed', async () => {
-    const e = await fixture(['小王', '小李', '小张']);
-    const [a] = e.ids as [number];
-    const userId = (name: string) =>
-      (e.db.prepare('SELECT id FROM users WHERE username = ?').get(name) as { id: number }).id;
-    const ctx = (name: string): ToolContext => ({
-      db: e.db,
-      config: e.config,
-      now: e.clock.now,
-      siteUrl: 'https://example.invalid',
-      userId: userId(name),
-      wecomUserId: `wc-${name}`,
-      card: null,
-    });
-    const latest = () => e.db.prepare('SELECT * FROM wecom_actions ORDER BY id DESC').get() as ActionRow;
-    await e.bob.post(`${e.base}/split`, { quantity: 20, outcomeId: a });
-    await e.order(e.bob, { outcomeId: a, side: 'sell', price: 0.3, quantity: 5 });
-    await e.order(e.bob, { outcomeId: a, side: 'sell', price: 0.4, quantity: 10 });
-
-    const book = JSON.parse(runTool(ctx('alice'), 'get_order_book', { marketId: e.id, outcome: '小王' }).content);
-    expect(book).toMatchObject({
-      share: '小王 · Yes',
-      asks: [
-        { price: 0.3, quantity: 5 },
-        { price: 0.4, quantity: 10 },
-      ],
-    });
-    expect(runTool(ctx('alice'), 'place_bet', { marketId: e.id, outcome: '小王', amount: 5 }).isError).toBe(true);
-
-    const buy = ctx('alice');
-    const quoted = runTool(buy, 'place_order', {
-      marketId: e.id,
-      outcome: '小王',
-      side: 'buy',
-      orderType: 'market',
-      amount: 3.5,
-    });
-    expect(quoted.isError).toBe(false);
-    expect(JSON.stringify(buy.card)).toContain('10 份，均价 0.35');
-    expect(await e.balance()).toBe(1000);
-    // The card's order never fills above the previewed worst price.
-    expect(JSON.parse(latest().payload).input).toMatchObject({ type: 'FAK', amount: 3.5, price: 0.4 });
-    expect(executeAction(e.db, latest(), e.clock.now).detail).toBe('全部成交 10 份，均价 0.35');
-    expect(await e.balance()).toBe(996.5);
-
-    runTool(ctx('alice'), 'place_order', {
-      marketId: e.id,
-      outcome: '小李',
-      share: 'no',
-      side: 'buy',
-      orderType: 'limit',
-      price: 0.6,
-      shares: 5,
-    });
-    expect(executeAction(e.db, latest(), e.clock.now).detail).toBe('已挂单，等待成交');
-    expect(await e.balance()).toBe(993.5);
-    const resting = e.db
-      .prepare(`SELECT id FROM exchange_orders WHERE user_id = ? AND status = 'open'`)
-      .get(userId('alice')) as { id: number };
-    expect(runTool(ctx('bob'), 'cancel_order', { orderId: resting.id }).isError).toBe(true);
-    expect(runTool(ctx('alice'), 'cancel_order', { orderId: resting.id }).isError).toBe(false);
-    executeAction(e.db, latest(), e.clock.now);
-    expect(await e.balance()).toBe(996.5);
-    const oversell = runTool(ctx('alice'), 'place_order', {
-      marketId: e.id,
-      outcome: '小王',
-      side: 'sell',
-      orderType: 'market',
-      shares: 11,
-    });
-    expect(oversell).toMatchObject({ isError: true });
-    expect(oversell.content).toContain('只有 10 份');
-
-    const create = ctx('carol');
-    runTool(create, 'create_market', {
-      question: '年会抽奖谁中一等奖？',
-      category: '公司',
-      closeAt: new Date(e.clock.now + DAY).toISOString(),
-      mode: 'polymarket',
-      outcomes: ['甲', '乙', '丙'],
-    });
-    const created = executeAction(e.db, latest(), e.clock.now).marketId;
-    expect(e.db.prepare('SELECT mode, neg_risk FROM markets WHERE id = ?').get(created)).toEqual({
-      mode: 'polymarket',
-      neg_risk: 1,
-    });
-
-    // Winners of 小张: holders of 小张 Yes and of every other option's No (bob's 小王 No).
-    e.clock.now += 2 * DAY;
-    const resolve = ctx('alice');
-    runTool(resolve, 'resolve_market', { marketId: e.id, outcome: '小张' });
-    expect(resolve.card?.horizontal_content_list).toContainEqual({ keyname: '获胜持有人', value: '1' });
   });
 });

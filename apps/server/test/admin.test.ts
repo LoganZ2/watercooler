@@ -1,10 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppDeps } from '../src/context';
 import { createRuntime, type AppRuntime, type Runtime } from '../src/runtime';
-import type { WecomService } from '../src/wecom/bot';
 import { fakePolymarket, setup } from './helpers';
 
 const DAY = 86_400_000;
@@ -19,25 +18,20 @@ async function adminEnv(extra: Parameters<typeof setup>[1] = () => ({})) {
 }
 
 /**
- * An admin env with real feature flags and fake services. restart() starts a fresh runtime over
- * the same database, the way restarting the instance does.
+ * An admin env with real feature flags, a fake Polymarket and a .env file. restart() starts a fresh
+ * runtime over the same database, the way restarting the instance does.
  */
 async function runtimeEnv(envText?: string) {
   const dir = mkdtempSync(join(tmpdir(), 'wc-admin-'));
-  const files = { dir, bot: join(dir, 'bot.json'), env: join(dir, '.env') };
+  const files = { dir, env: join(dir, '.env') };
   if (envText !== undefined) writeFileSync(files.env, envText);
-  const running = { bots: 0, wecom: 0 };
-  /** The werewolf service: whether it runs, and with how many seats. */
-  const werewolf = { running: 0, players: 0 };
   let current: Runtime | undefined;
   const proxy: AppRuntime = {
-    botsRunning: () => current?.botsRunning() ?? false,
-    wecom: () => current?.wecom(),
     features: () => current?.features() ?? [],
     apply: async () => current?.apply(),
   };
   let base!: Pick<AppDeps, 'db' | 'config' | 'now'>;
-  const env = setup({ botConfigPath: files.bot, envFilePath: files.env }, (b) => {
+  const env = setup({ envFilePath: files.env }, (b) => {
     base = b;
     return { runtime: proxy };
   });
@@ -46,27 +40,10 @@ async function runtimeEnv(envText?: string) {
   env.db.prepare(`UPDATE users SET is_admin = 1 WHERE username = 'boss'`).run();
   const restart = async () => {
     current?.stop();
-    current = createRuntime({
-      polymarket: fakePolymarket().client,
-      ...base,
-      log: () => {},
-      startBots: async () => {
-        running.bots++;
-        return () => running.bots--;
-      },
-      startWecom: () => {
-        running.wecom++;
-        return { announceBinding: () => {}, connected: () => true, stop: () => running.wecom-- } as WecomService;
-      },
-      startWerewolf: (bot) => {
-        werewolf.running++;
-        werewolf.players = bot.werewolf.players;
-        return { stop: () => werewolf.running--, status: () => ({ game: null, problem: null }) };
-      },
-    });
+    current = createRuntime({ polymarket: fakePolymarket().client, ...base, log: () => {} });
     await current.apply();
   };
-  return { env, admin, alice, files, running, werewolf, restart };
+  return { env, admin, alice, files, restart };
 }
 
 describe('admin console', () => {
@@ -193,160 +170,17 @@ describe('admin console', () => {
     env.db.close();
   });
 
-  it('runs the bots and the WeCom bot exactly as the flags say, with credentials read at startup', async () => {
-    const { env, admin, files, running, restart } = await runtimeEnv();
+  it('saves the site settings to .env, lists the switches and asks for a restart', async () => {
+    const { env, admin, alice, files, restart } = await runtimeEnv('# 站点设置\nFOO=bar\nDAILY_BONUS=100\n');
     try {
-      const feature = async (key: string) =>
-        (await admin.get('/admin/overview')).body.features.find((f: { key: string }) => f.key === key);
-      const enable = (key: string, enabled = true) => admin.post('/admin/features', { key, enabled });
-
-      // No credentials: the flags start off and cannot be switched on.
       await restart();
-      expect(await feature('aiBots')).toMatchObject({ enabled: false, configured: false, active: false });
-      expect((await enable('aiBots')).status).toBe(409);
-
-      // Saved credentials count only after a restart.
-      writeFileSync(files.bot, JSON.stringify({ apiKey: 'k', model: 'm' }));
-      expect((await enable('aiBots')).status).toBe(409);
-      await restart();
-      // The flag stays off: having credentials does not switch anything on.
-      expect(await feature('aiBots')).toMatchObject({ enabled: false, configured: true, active: false });
-      expect(running).toEqual({ bots: 0, wecom: 0 });
-      expect((await enable('aiBots')).status).toBe(200);
-      expect(running).toEqual({ bots: 1, wecom: 0 });
-      expect((await enable('wecom')).status).toBe(409);
-
-      writeFileSync(
-        files.bot,
-        JSON.stringify({ apiKey: 'k', model: 'm', wecom: { botId: 'b', secret: 's', siteUrl: 'https://x.com/wc' } }),
-      );
-      await restart();
-      expect(running).toEqual({ bots: 1, wecom: 0 });
-      expect((await enable('wecom')).status).toBe(200);
-      expect(running).toEqual({ bots: 1, wecom: 1 });
-      expect((await admin.get('/config')).body).toMatchObject({ aiZone: true, wecom: true });
-
-      await enable('wecom', false);
-      expect(running).toEqual({ bots: 1, wecom: 0 });
-
-      // On without credentials is reported as misconfigured, not quietly treated as off.
-      rmSync(files.bot);
-      await restart();
-      expect(running).toEqual({ bots: 0, wecom: 0 });
-      expect(await feature('aiBots')).toMatchObject({
-        enabled: true,
-        configured: false,
-        active: false,
-        problem: '缺少配置：服务器上没有 bot.json',
-      });
-      expect((await enable('aiBots', false)).status).toBe(200);
-    } finally {
-      env.db.close();
-      rmSync(files.dir, { recursive: true, force: true });
-    }
-  });
-
-  it('plays werewolf only while its flag is on, never switched on by credentials alone', async () => {
-    const { env, admin, alice, files, werewolf, restart } = await runtimeEnv();
-    try {
-      const enable = (enabled = true) => admin.post('/admin/features', { key: 'werewolf', enabled });
-      await restart();
-      expect((await enable()).status).toBe(409);
-      expect((await admin.post('/admin/config/werewolf', { players: 7, restMinutes: 5, model: '' })).status).toBe(409);
-
-      writeFileSync(files.bot, JSON.stringify({ apiKey: 'k', model: 'm' }));
-      const saved = await admin.post('/admin/config/werewolf', { players: 7, restMinutes: 5, model: 'cheap' });
-      expect(saved.body.werewolf).toEqual({ players: 7, restMinutes: 5, model: 'cheap' });
-      expect(JSON.parse(readFileSync(files.bot, 'utf8')).werewolf).toEqual({
-        players: 7,
-        restMinutes: 5,
-        model: 'cheap',
-      });
-      expect((await admin.post('/admin/config/werewolf', { players: 13, restMinutes: 5, model: '' })).status).toBe(400);
-
-      await restart();
-      expect(werewolf.running).toBe(0);
-      expect((await alice.get('/config')).body).toMatchObject({ werewolf: false });
-      expect((await enable()).status).toBe(200);
-      expect(werewolf).toEqual({ running: 1, players: 7 });
-      expect((await alice.get('/config')).body).toMatchObject({ werewolf: true, aiZone: true });
-      await restart();
-      expect(werewolf.running).toBe(1);
-      await enable(false);
-      expect(werewolf.running).toBe(0);
-      expect((await admin.get('/admin/audit')).body.map((a: { detail: string }) => a.detail).slice(0, 2)).toEqual([
-        '关闭「AI 狼人杀」',
-        '开启「AI 狼人杀」',
-      ]);
-    } finally {
-      env.db.close();
-      rmSync(files.dir, { recursive: true, force: true });
-    }
-  });
-
-  it('switches flags on once from the credentials an instance already had, then leaves them alone', async () => {
-    const { env, admin, files, running, restart } = await runtimeEnv();
-    try {
-      writeFileSync(
-        files.bot,
-        JSON.stringify({ apiKey: 'k', model: 'm', wecom: { botId: 'b', secret: 's', siteUrl: 'https://x.com/wc' } }),
-      );
-      await restart();
-      expect(running).toEqual({ bots: 1, wecom: 1 });
-      await admin.post('/admin/features', { key: 'wecom', enabled: false });
-      await restart();
-      expect(running).toEqual({ bots: 1, wecom: 0 });
-    } finally {
-      env.db.close();
-      rmSync(files.dir, { recursive: true, force: true });
-    }
-  });
-
-  it('saves credentials and site settings to the files, masks secrets and asks for a restart', async () => {
-    const { env, admin, alice, files } = await runtimeEnv('# 站点设置\nFOO=bar\nDAILY_BONUS=100\n');
-    try {
       const config = async () => (await admin.get('/admin/config')).body;
-      expect(await config()).toMatchObject({ ai: null, wecom: null, restartNeeded: false });
+      expect(await config()).toMatchObject({ restartNeeded: false });
       expect((await alice.get('/admin/config')).status).toBe(403);
       expect((await alice.post('/admin/config/site', {})).status).toBe(403);
-
-      const ai = {
-        endpoint: 'https://api.anthropic.com',
-        model: 'claude-opus-5-5',
-        bots: 10,
-        marketsPerDay: 2,
-        betsPerDay: 50,
-        flipProbability: 0.2,
-      };
-      expect((await admin.post('/admin/config/ai', ai)).body.error).toBe('请填写 API key');
-      const saved = await admin.post('/admin/config/ai', { ...ai, apiKey: 'sk-ant-secret-1234' });
-      expect(saved.body.ai).toMatchObject({ model: 'claude-opus-5-5', bots: 10, apiKeyHint: '已设置（…1234）' });
-      expect(JSON.stringify(saved.body)).not.toContain('secret-1234');
-      expect(statSync(files.bot).mode & 0o777).toBe(0o600);
-      expect((await admin.get('/admin/overview')).body.restartNeeded).toBe(true);
-
-      // Leaving the key empty keeps it.
-      await admin.post('/admin/config/ai', { ...ai, model: 'claude-sonnet-5-5' });
-      expect(JSON.parse(readFileSync(files.bot, 'utf8'))).toMatchObject({
-        apiKey: 'sk-ant-secret-1234',
-        model: 'claude-sonnet-5-5',
-      });
-
-      const wecom = {
-        botId: 'bot1',
-        siteUrl: 'https://ky-z.com/watercooler',
-        siteName: 'Watercooler',
-        messagesPerHour: 30,
-      };
-      expect((await admin.post('/admin/config/wecom', wecom)).body.error).toBe('请填写 Secret');
-      const withWecom = (await admin.post('/admin/config/wecom', { ...wecom, secret: 'wecom-secret-9876' })).body;
-      expect(withWecom.wecom).toMatchObject({ botId: 'bot1', secretHint: '已设置（…9876）' });
-      expect(JSON.parse(readFileSync(files.bot, 'utf8'))).toMatchObject({
-        model: 'claude-sonnet-5-5',
-        wecom: { secret: 'wecom-secret-9876' },
-      });
-      expect((await admin.post('/admin/config/wecom/remove')).body.wecom).toBeNull();
-      expect(JSON.parse(readFileSync(files.bot, 'utf8'))).not.toHaveProperty('wecom');
+      const overview = (await admin.get('/admin/overview')).body;
+      expect(overview.features.map((f: { key: string }) => f.key)).toEqual(['polymarket', 'mimic']);
+      expect(overview.restartNeeded).toBe(false);
 
       const site = {
         inviteCode: 'hello',
@@ -365,10 +199,8 @@ describe('admin console', () => {
       expect(readFileSync(files.env, 'utf8')).not.toContain('INVITE_CODE');
       // Nothing applies before the restart.
       expect((await alice.get('/config')).body).toMatchObject({ privateMode: false, dailyBonus: 100 });
-
-      const log = (await admin.get('/admin/audit')).body.map((a: { detail: string }) => a.detail).join('\n');
-      expect(log).toContain('更换了 API key');
-      expect(log).not.toContain('secret');
+      expect((await admin.get('/admin/overview')).body.restartNeeded).toBe(true);
+      expect((await admin.get('/admin/audit')).body[0].detail).toContain('更新站点设置');
     } finally {
       env.db.close();
       rmSync(files.dir, { recursive: true, force: true });
